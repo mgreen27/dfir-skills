@@ -9,8 +9,8 @@ that help prepare tooling, classify evidence, and support downstream analysis.
 ## Operating Rules
 
 1. Keep the repo focused on automated incident response use cases.
-2. Maintain each skill as a separate folder with a `SKILL.md` and a `scripts/`
-   subfolder.
+2. Maintain each skill as a separate folder with a `SKILL.md`. Add a
+   `scripts/` subfolder only when the skill actually needs executable helpers.
 3. Read [config.md](./config.md) before adding defaults or path assumptions.
 4. Assume the repo-local virtual environment lives at `./venv` unless the user
    says otherwise.
@@ -23,6 +23,33 @@ that help prepare tooling, classify evidence, and support downstream analysis.
 9. Keep learnings short, dated, and directly useful to the next agent run.
 10. Treat the unbounded `flows()` inventory query as a critical investigation
     requirement. Do not add `LIMIT` to the canonical prior-flow review query.
+11. Treat `./investigation-wikis/<hostname>/` as the default durable analysis
+    record for iterative casework.
+12. Keep raw tool outputs under `./investigations/<hostname>/` and use the
+    investigation wiki for narrative analysis, leads, timeline, and evidence
+    review.
+13. If an investigation wiki exists, update its `wiki/` pages instead of
+    keeping flat `investigation-notes.md` and `investigation-results.md`
+    files.
+
+## DFIR Analysis Prompt
+
+Use this prompt when writing investigation analysis or summarizing results:
+
+You are a senior DFIR analyst. Be technically precise, evidence-driven, and
+skeptical of weak signals. Review the supplied investigation wiki pages, raw
+result files, and artifact outputs with close attention to execution evidence,
+timeline consistency, user context, persistence, credential access, lateral
+movement, defense evasion, and data staging or exfiltration. Separate
+confirmed findings from leads and noise. For each notable item, explain why it
+matters, what artifact supports it, how strong the evidence is, and what the
+most likely benign explanation would be. Do not overclaim. Call out
+interpretation caveats for artifacts like AppCompatCache, UserAssist, Amcache,
+BAM, Prefetch, and event-log detections. Produce a concise analyst narrative
+with: executive summary, key findings, confidence, gaps, and next
+investigative actions. Prefer exact paths, timestamps, usernames, hostnames,
+process names, command lines, artifact names, and vault page references. If
+evidence is insufficient, say so clearly.
 
 ## Execution Learnings
 
@@ -170,9 +197,9 @@ that help prepare tooling, classify evidence, and support downstream analysis.
   includes readable `Created` and `LastActive` timestamps so the newest runs
   can be triaged before checking for an exact parameter match.
 - Windows analysis results should be written into the machine investigation
-  folder, and that folder should keep an `investigation-notes.md` file with
-  client status, flow ids, commands, outputs, and observations, plus an
-  `investigation-results.md` file for the actual DFIR findings narrative.
+  folder under `./investigations/<hostname>/`, while iterative analyst work
+  should be captured in the matching Obsidian vault under
+  `./investigation-wikis/<hostname>/`.
 - Do not add date limits to Windows analysis collections unless the user
   explicitly asks for a bounded time window.
 - When queueing DetectRaptor artifacts through the API CLI, pass the local
@@ -190,3 +217,39 @@ that help prepare tooling, classify evidence, and support downstream analysis.
 - Investigation folders now live under the repo root at `./investigations/`
   and that path should be gitignored. Use repo-local investigation paths in
   docs, examples, and saved notes instead of `~/data/investigations`.
+- If Volatility 3 is run with a repo-local `--cache-path`, create that cache
+  directory first. The current CLI will fail immediately if the target cache
+  directory does not already exist.
+- The repo now includes a `memory-analysis` skill for Volatility 3 triage,
+  with outputs written to `./investigations/<investigation-name>/volatility3/`
+  and analyst findings maintained in the matching investigation wiki.
+- For dead-disk investigations, do not treat Velociraptor mapped clients as
+  valid sources for live process semantics. Use the separate memory image and
+  Volatility for process, parent-child, and live execution context.
+- On the current `base-dc-memory.img`, `windows.info` and `windows.psscan`
+  produce useful output, but `pslist`, `cmdline`, `dlllist`, `handles`, and
+  some network-oriented plugins can return sparse or empty results. Prefer
+  scan-based memory plugins when richer enumeration fails on this image.
+- In memory-analysis workflows, if `python volatility3/vol.py -f
+  data/base-dc-memory.img windows.psscan` works but `windows.pslist` fails,
+  rerun with `-vvv` and preserve the debug stderr. `windows.netscan` is also
+  often still worth running because it scans memory structures directly.
+- The repo now includes DFIR-specific Obsidian skills for scaffolding,
+  ingesting, and querying per-host investigation vaults under
+  `./investigation-wikis/`.
+- Investigation wikis are the default system of record for iterative analysis.
+  Legacy `investigation-notes.md` and `investigation-results.md` files should
+  be migrated into the vault and then retired.
+- The main goal of the Obsidian workflow is iterative analysis: keep raw
+  outputs in `./investigations/`, but accumulate analyst judgement, timeline
+  refinement, and artifact interpretation in the host wiki.
+- The investigation-wiki scaffold creates the vault structure and an `evidence`
+  symlink back to `./investigations/<hostname>/`, while the ingest skill builds
+  file-level artifact notes under `wiki/artifacts/` and refreshes the hot
+  cache.
+- When generating markdown from shell here-doc templates, escape literal
+  backticks. Unescaped markdown code spans can trigger shell command
+  substitution and break the sync workflow.
+- Command-first skills such as `windows_analysis` and `memory-analysis` do not
+  need empty `scripts/` directories. Only keep `scripts/` when a skill ships
+  real helper files.

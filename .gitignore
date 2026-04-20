@@ -11,7 +11,10 @@ velociraptor/
 volatility3/
 dfir-tools/
 data/
+investigations/
+investigation-wikis/
 .cache/
+volatility3-cache/
 
 # macOS
 .DS_Store

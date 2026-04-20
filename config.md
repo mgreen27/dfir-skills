@@ -6,6 +6,7 @@
 |---|---|
 | Analysis folder | `~/data` |
 | Investigation root | `./investigations` |
+| Investigation wiki root | `./investigation-wikis` |
 | Velociraptor folder | `~/velociraptor` |
 | Repo virtualenv | `./venv` |
 | Repo tool staging | repo root |
@@ -16,6 +17,8 @@
   and evidence unless the user specifies a different location.
 - Use `./investigations` under the repo root for saved investigation folders
   when a skill needs durable outputs that will be re-reviewed or chunked later.
+- Use `./investigation-wikis` under the repo root for per-host Obsidian vaults
+  that hold iterative analysis, findings, leads, and timeline notes.
 - Use `~/velociraptor` as the default folder for Velociraptor binaries,
   configuration, and related artefacts unless the user specifies a different
   location.

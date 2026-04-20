@@ -17,9 +17,9 @@ against a Velociraptor client.
 4. Resolve the target by hostname or use a known client id directly.
 5. Check whether the same collection has already been run with the same parameters.
 6. List or inspect available artifacts before running broader collections.
-7. Create or reuse an investigation folder for saved outputs. `./investigations/<investigation-name>/` is the default pattern for durable outputs that will be chunked or re-reviewed later. The investigation name can be the hostname, a case number, or a descriptive name that fits your workflow.
-8. Keep an `investigation-notes.md` file in that folder for operational context, flow ids, commands, and analyst scratch notes.
-9. Keep an `investigation-results.md` file in that folder for DFIR findings, interpretation, confidence, and next actions.
+7. Create or reuse an investigation folder for saved outputs. `./investigations/<investigation-name>/` is the default pattern for durable raw outputs that will be chunked or re-reviewed later.
+8. Create or reuse the matching investigation wiki under `./investigation-wikis/<investigation-name>/` for iterative analysis.
+9. Keep analyst reasoning in the investigation wiki pages, especially `wiki/findings.md`, `wiki/timeline.md`, `wiki/leads.md`, and `wiki/evidence.md`.
 10. By default, run collections without date limits unless the user explicitly asks for a bounded time window.
 11. Treat unbounded prior-flow review as a critical requirement. Do not add a `LIMIT` to the canonical `flows()` inventory query when reviewing prior collections for analysis.
 
@@ -91,14 +91,8 @@ For deeper-dive follow-up work:
 - then run a bounded collection
 
 Save results into an investigation folder when you expect follow-up review,
-chunking, or multiple passes over the same host.
-
-Keep two Markdown files in the investigation folder:
-
-- `investigation-notes.md` for current client status, flow ids, commands,
-  analyst scratch notes, and execution context
-- `investigation-results.md` for the DFIR narrative, findings, confidence,
-  caveats, and next investigative actions
+chunking, or multiple passes over the same host, then sync those outputs into
+the matching investigation wiki for iterative analysis.
 
 ## Commands
 
@@ -240,8 +234,7 @@ Create an investigation folder for durable outputs:
 
 ```bash
 mkdir -p /Users/matt/git/dfir-skills/investigations/base-dc/velociraptor
-touch /Users/matt/git/dfir-skills/investigations/base-dc/investigation-notes.md
-touch /Users/matt/git/dfir-skills/investigations/base-dc/investigation-results.md
+/Users/matt/git/dfir-skills/skills/investigation-wiki/scripts/init_investigation_wiki.sh base-dc
 ```
 
 Queue DetectRaptor EVTX with no date limits by client id:
@@ -285,8 +278,12 @@ Default investigation layout:
 ./investigations/<investigation-name>/
   velociraptor/
     <target>-<artifact>.jsonl
-  investigation-notes.md
-  investigation-results.md
+./investigation-wikis/<investigation-name>/
+  wiki/
+    findings.md
+    timeline.md
+    leads.md
+    evidence.md
 ```
 
 ## Notes
@@ -304,10 +301,11 @@ Default investigation layout:
 - The default artifact is `DetectRaptor.Windows.Detection.Evtx`.
 - The default result output directory is
   `./investigations/<investigation-name>/velociraptor/`.
-- Keep `./investigations/<investigation-name>/investigation-notes.md`
-  updated with run context and observations.
-- Keep `./investigations/<investigation-name>/investigation-results.md`
-  updated with validated findings, caveats, and next actions.
+- Keep `./investigations/<investigation-name>/` for raw outputs only.
+- Keep `./investigation-wikis/<investigation-name>/wiki/` up to date with
+  validated findings, caveats, leads, timeline entries, and next actions.
+- After a collection wave, run the investigation-wiki ingest skill so the
+  artifact index and hot cache reflect the latest raw outputs.
 - Prefer retrieving finished results with `source(client_id=..., flow_id=...,
   artifact=...)` and saving them as `.jsonl` for durable review. Small outputs
   can still be written as `.json`, but `.jsonl` is the safer default for large
