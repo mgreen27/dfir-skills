@@ -55,6 +55,8 @@ That folder contains:
 
 - `client.config.yaml`
 - `remapping.yaml`
+- `client-info.json`
+- `client-info.log`
 - `client.log`
 - `client.pid`
 - `session.env`
@@ -77,6 +79,10 @@ The GUI log lives at:
 - Each mapped client gets its own `client.config.yaml`, temp directory, and
   writeback file so the image name can map to a stable Velociraptor hostname
   instead of reusing a shared client identity.
+- The script looks up the enrolled client through `api_client.yaml` using a
+  `clients()` VQL query that reads the client record populated by
+  `Generic.Client.Info/BasicInformation`, then writes the result to
+  `client-info.json`.
 - Dead-disk clients are suitable for offline filesystem and registry artifacts,
   not true live-response plugins that depend on running processes or live
   network state.

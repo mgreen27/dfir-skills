@@ -8,9 +8,11 @@ WORKSPACE_DIR="${REPO_ROOT}/velociraptor"
 VELOCIRAPTOR_BIN="${WORKSPACE_DIR}/velociraptor"
 SERVER_CONFIG="${WORKSPACE_DIR}/server.config.yaml"
 CLIENT_CONFIG="${WORKSPACE_DIR}/client.config.yaml"
+API_CLIENT_CONFIG="${WORKSPACE_DIR}/api_client.yaml"
 GUI_LOG="${WORKSPACE_DIR}/gui.log"
 GUI_PID_FILE="${WORKSPACE_DIR}/gui.pid"
 GUI_WAIT_SECONDS=20
+CLIENT_INFO_WAIT_SECONDS=30
 
 EVIDENCE_PATH=""
 HOSTNAME_OVERRIDE=""
@@ -19,6 +21,12 @@ info()    { echo "[INFO]  $*"; }
 success() { echo "[OK]    $*"; }
 warn()    { echo "[WARN]  $*"; }
 error()   { echo "[ERROR] $*" >&2; exit 1; }
+
+write_env_line() {
+    local key="$1"
+    local value="${2-}"
+    printf '%s=%q\n' "$key" "$value"
+}
 
 usage() {
     printf '%s\n' \
@@ -145,6 +153,7 @@ ensure_workspace_ready() {
     [ -x "$VELOCIRAPTOR_BIN" ] || error "Velociraptor binary not found at ${VELOCIRAPTOR_BIN}. Run ./skills/prep-dfir-tools/scripts/prep_dfir_tools.sh -t velociraptor first."
     [ -f "$SERVER_CONFIG" ] || error "Velociraptor server config not found at ${SERVER_CONFIG}. Run ./skills/prep-dfir-tools/scripts/prep_dfir_tools.sh -t velociraptor first."
     [ -f "$CLIENT_CONFIG" ] || error "Velociraptor client config not found at ${CLIENT_CONFIG}. Run ./skills/prep-dfir-tools/scripts/prep_dfir_tools.sh -t velociraptor first."
+    [ -f "$API_CLIENT_CONFIG" ] || error "Velociraptor API config not found at ${API_CLIENT_CONFIG}. Run ./skills/prep-dfir-tools/scripts/prep_dfir_tools.sh -t velociraptor first."
 }
 
 start_gui_if_needed() {
@@ -176,6 +185,17 @@ safe_name() {
         | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//'
 }
 
+normalize_hostname_base() {
+    local base="$1"
+
+    printf '%s' "$base" | sed -E '
+        s/([._-])(disk|image|img|mem|memory)$//;
+        s/([._-])([a-z])drive$//;
+        s/([._-])drive$//;
+        s/[._-]+$//
+    '
+}
+
 default_hostname() {
     local source="$1"
     local base=""
@@ -183,6 +203,7 @@ default_hostname() {
     base="$(basename "$source")"
     base="${base%%.*}"
     base="$(safe_name "$base")"
+    base="$(normalize_hostname_base "$base")"
 
     if [ -n "$base" ]; then
         printf '%s' "$base"
@@ -223,16 +244,83 @@ write_session_file() {
     local remap_file="$3"
     local client_pid="$4"
     local client_config="$5"
+    local client_info_file="$6"
+    local client_info_status="$7"
 
-    cat >"$session_file" <<EOF
-CLIENT_NAME=${client_name}
-EVIDENCE_PATH=${EVIDENCE_PATH}
-REMAP_FILE=${remap_file}
-CLIENT_PID=${client_pid}
-CLIENT_CONFIG=${client_config}
-GUI_URL=$(gui_url)
-STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-EOF
+    {
+        write_env_line "CLIENT_NAME" "$client_name"
+        write_env_line "EVIDENCE_PATH" "$EVIDENCE_PATH"
+        write_env_line "REMAP_FILE" "$remap_file"
+        write_env_line "CLIENT_PID" "$client_pid"
+        write_env_line "CLIENT_CONFIG" "$client_config"
+        write_env_line "GUI_URL" "$(gui_url)"
+        write_env_line "STARTED_AT" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        write_env_line "CLIENT_INFO_FILE" "$client_info_file"
+        write_env_line "CLIENT_INFO_STATUS" "$client_info_status"
+    } >"$session_file"
+}
+
+regex_escape() {
+    printf '%s' "$1" | sed -e 's/[][(){}.^$*+?|\/\\]/\\&/g'
+}
+
+build_client_info_vql() {
+    local hostname="$1"
+    local escaped_hostname=""
+
+    escaped_hostname="$(regex_escape "$hostname")"
+
+    printf '%s' \
+        "SELECT client_id," \
+        "timestamp(epoch=first_seen_at) as FirstSeen," \
+        "timestamp(epoch=last_seen_at) as LastSeen," \
+        "os_info.hostname as Hostname," \
+        "os_info.fqdn as Fqdn," \
+        "os_info.system as OSType," \
+        "os_info.release as OS," \
+        "os_info.machine as Machine," \
+        "agent_information.version as AgentVersion " \
+        "FROM clients() WHERE os_info.hostname =~ '^${escaped_hostname}$' OR os_info.fqdn =~ '^${escaped_hostname}$' ORDER BY LastSeen DESC LIMIT 1"
+}
+
+find_client_info() {
+    local hostname="$1"
+    local client_info_file="$2"
+    local client_info_log="$3"
+    local tmp_file="${client_info_file}.tmp"
+    local vql=""
+
+    vql="$(build_client_info_vql "$hostname")"
+
+    if ! "$VELOCIRAPTOR_BIN" -a "$API_CLIENT_CONFIG" --runas api \
+        query --format json "$vql" >"$tmp_file" 2>>"$client_info_log"; then
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    mv "$tmp_file" "$client_info_file"
+    grep -q '"client_id"' "$client_info_file"
+}
+
+wait_for_client_info() {
+    local hostname="$1"
+    local client_dir="$2"
+    local client_info_file="${client_dir}/client-info.json"
+    local client_info_log="${client_dir}/client-info.log"
+    local tries=0
+
+    : >"$client_info_log"
+
+    while [ "$tries" -lt "$CLIENT_INFO_WAIT_SECONDS" ]; do
+        if find_client_info "$hostname" "$client_info_file" "$client_info_log"; then
+            return 0
+        fi
+
+        sleep 1
+        tries=$((tries + 1))
+    done
+
+    return 1
 }
 
 escape_sed_replacement() {
@@ -274,13 +362,18 @@ start_mapped_client() {
     local client_log="${client_dir}/client.log"
     local client_pid_file="${client_dir}/client.pid"
     local session_file="${client_dir}/session.env"
+    local client_info_file="${client_dir}/client-info.json"
+    local client_info_status="pending"
     local existing_pid=""
 
     if [ -f "$client_pid_file" ]; then
         existing_pid="$(cat "$client_pid_file" 2>/dev/null || true)"
         if [ -n "$existing_pid" ] && kill -0 "$existing_pid" >/dev/null 2>&1; then
             info "Mapped client ${client_name} is already running with PID ${existing_pid}"
-            write_session_file "$session_file" "$client_name" "$remap_file" "$existing_pid" "$client_config"
+            if wait_for_client_info "$client_name" "$client_dir"; then
+                client_info_status="found"
+            fi
+            write_session_file "$session_file" "$client_name" "$remap_file" "$existing_pid" "$client_config" "$client_info_file" "$client_info_status"
             return 0
         fi
     fi
@@ -301,7 +394,13 @@ start_mapped_client() {
         return 1
     fi
 
-    write_session_file "$session_file" "$client_name" "$remap_file" "$client_pid" "$client_config"
+    if wait_for_client_info "$client_name" "$client_dir"; then
+        client_info_status="found"
+    else
+        warn "Client info was not available yet for ${client_name}. Check: ${client_dir}/client-info.log"
+    fi
+
+    write_session_file "$session_file" "$client_name" "$remap_file" "$client_pid" "$client_config" "$client_info_file" "$client_info_status"
     success "Mapped client ${client_name} is running with PID ${client_pid}"
 }
 
@@ -343,7 +442,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 EVIDENCE_PATH="$1"
-require_cmd curl awk sed basename wc date nohup
+require_cmd curl awk sed basename wc date nohup grep
 ensure_workspace_ready
 validate_evidence_path
 

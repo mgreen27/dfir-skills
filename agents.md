@@ -21,6 +21,8 @@ that help prepare tooling, classify evidence, and support downstream analysis.
    component, such as `./venv`, instead of rerunning every prep step.
 8. Update the `Execution Learnings` section in this file after each execution.
 9. Keep learnings short, dated, and directly useful to the next agent run.
+10. Treat the unbounded `flows()` inventory query as a critical investigation
+    requirement. Do not add `LIMIT` to the canonical prior-flow review query.
 
 ## Execution Learnings
 
@@ -122,3 +124,69 @@ that help prepare tooling, classify evidence, and support downstream analysis.
 - `Server.Import.DetectRaptor` is not built in by default; prep must first run
   `Server.Import.ArtifactExchange`, then collect `Server.Import.DetectRaptor`
   as the `api` user against the root org.
+- Velociraptor prep should wait for the local API user to answer a simple query
+  before attempting community artifact imports during the temporary init
+  window.
+- The mapped-client skill should not inspect offline registry hives for host
+  metadata; instead it should query `clients()` through `api_client.yaml` and
+  treat the `Generic.Client.Info/BasicInformation` record as the source of
+  client identity details.
+- The repo now includes a `windows_analysis` skill for listing
+  Windows/DetectRaptor artifacts and running API-backed collections such as
+  `DetectRaptor.Windows.Detection.Evtx` against a hostname or client id.
+- Windows-analysis style collections should prefer durable investigation output
+  folders under the analysis root when the results are likely to be reviewed in
+  multiple passes or chunked for later context management.
+- The `windows_analysis` skill is command-first: keep the canonical
+  Velociraptor CLI and VQL commands in `SKILL.md` instead of hiding simple
+  workflows behind an extra wrapper script.
+- The Windows investigation overview should explicitly cover
+  `DetectRaptor.Windows.Detection.Applications`,
+  `DetectRaptor.Windows.Detection.Powershell.PSReadline`,
+  `Windows.Detection.Amcache`, `Windows.Forensics.Bam`,
+  `Windows.Forensics.Timeline`, `Windows.Registry.UserAssist`,
+  `Windows.Registry.AppCompatCache`, `Windows.Forensics.Prefetch`,
+  `Windows.NTFS.MFT`, `Windows.Search.FileFinder`,
+  `DetectRaptor.Generic.Detection.YaraFile`,
+  `DetectRaptor.Generic.Detection.YaraWebshell`, and
+  `DetectRaptor.Generic.Detection.BrowserExtensions` so evidence-of-execution
+  and follow-up content-based pivots are documented alongside the initial EVTX
+  sweep.
+- Evidence-of-execution artifacts must carry interpretation notes or require an
+  `artifacts show <name>` review before use; these artifacts do not all provide
+  equivalent execution semantics and should not be summarized loosely.
+- Windows investigation workflows must check that the target client is online
+  and has a recent `LastSeen` before queueing collections. If the mapped client
+  is offline, API flows will stay queued and the GUI will not show useful
+  results.
+- Client collections that should appear in the Velociraptor GUI must be queued
+  through `api_client.yaml`; the local `server.config.yaml` path is still
+  useful for `artifacts list` and `artifacts show`, but it is not the right
+  execution path for GUI-visible client analysis.
+- Before queueing a Windows analysis collection, check `flows()` for the same
+  artifact and parameter set on the target client. Reuse prior finished results
+  where possible instead of creating duplicate collections.
+- Prior collection review should start with a latest-first `flows()` query that
+  includes readable `Created` and `LastActive` timestamps so the newest runs
+  can be triaged before checking for an exact parameter match.
+- Windows analysis results should be written into the machine investigation
+  folder, and that folder should keep an `investigation-notes.md` file with
+  client status, flow ids, commands, outputs, and observations, plus an
+  `investigation-results.md` file for the actual DFIR findings narrative.
+- Do not add date limits to Windows analysis collections unless the user
+  explicitly asks for a bounded time window.
+- When queueing DetectRaptor artifacts through the API CLI, pass the local
+  `artifact_definitions` directory so the custom artifact names resolve
+  correctly.
+- For investigation review, prefer API-side result retrieval with
+  `source(client_id=..., flow_id=..., artifact=...)` and save JSON into the
+  investigation folder. Use `jsonl` as the safe default for larger result
+  sets, because the CLI `json` mode may emit multiple JSON arrays in a single
+  stream. Only use `--output ...zip` when the user explicitly wants the full
+  Velociraptor package.
+- The canonical prior-flow inventory query is intentionally unbounded. Do not
+  add `LIMIT` to that review step, because truncating the flow list can hide
+  the most relevant earlier collections during iterative analysis.
+- Investigation folders now live under the repo root at `./investigations/`
+  and that path should be gitignored. Use repo-local investigation paths in
+  docs, examples, and saved notes instead of `~/data/investigations`.

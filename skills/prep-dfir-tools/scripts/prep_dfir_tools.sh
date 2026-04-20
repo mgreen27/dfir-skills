@@ -51,6 +51,26 @@ wait_for_file() {
     [ -f "$path" ]
 }
 
+wait_for_velociraptor_api() {
+    local workspace_dir="$1"
+    local binary="${workspace_dir}/velociraptor"
+    local api_client_file="${workspace_dir}/api_client.yaml"
+    local timeout="${2:-20}"
+    local waited=0
+
+    while [ "$waited" -lt "$timeout" ]; do
+        if "$binary" -a "$api_client_file" --runas api query --format json \
+            "SELECT 'ready' AS status FROM scope()" >/dev/null 2>&1; then
+            return 0
+        fi
+
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    return 1
+}
+
 require_cmd() {
     for cmd in "$@"; do
         command -v "$cmd" >/dev/null 2>&1 || error "Required command not found: $cmd"
@@ -201,7 +221,9 @@ initialize_velociraptor_workspace() {
     "$binary" --config "$config_file" config api_client --name api --role administrator "$api_client_file" \
         || warn "Could not generate Velociraptor API client config at ${api_client_file}"
 
-    if check_velociraptor_import_connectivity; then
+    if ! wait_for_velociraptor_api "$workspace_dir" 20; then
+        warn "Velociraptor API did not become ready during initialization; skipping artifact imports"
+    elif check_velociraptor_import_connectivity; then
         collect_velociraptor_server_artifact "$workspace_dir" "Server.Import.Extras" \
             || warn "Velociraptor extra artifact import did not complete cleanly"
         collect_velociraptor_server_artifact "$workspace_dir" "Server.Import.ArtifactExchange" \

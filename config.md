@@ -5,14 +5,17 @@
 | Setting | Default |
 |---|---|
 | Analysis folder | `~/data` |
+| Investigation root | `./investigations` |
 | Velociraptor folder | `~/velociraptor` |
 | Repo virtualenv | `./venv` |
 | Repo tool staging | repo root |
 
 ## Usage
 
-- Use `~/data` as the default analysis and data workspace for case material, evidence,
-  and investigation outputs unless the user specifies a different location.
+- Use `~/data` as the default analysis and data workspace for case material
+  and evidence unless the user specifies a different location.
+- Use `./investigations` under the repo root for saved investigation folders
+  when a skill needs durable outputs that will be re-reviewed or chunked later.
 - Use `~/velociraptor` as the default folder for Velociraptor binaries,
   configuration, and related artefacts unless the user specifies a different
   location.
