@@ -1,91 +1,131 @@
 # dfir-skills
 
-A repository of skills (scripts and helpers) for Digital Forensics and Incident
-Response (DFIR) investigations.
+A small DFIR skills repository for automated incident response. Each skill lives
+in its own folder and contains a `SKILL.md` plus a `scripts/` subfolder.
 
----
+The repo assumes a local Python virtual environment at `./venv`. The prep skill
+can create and populate that environment automatically.
+Tool prep stages tools in the repo root by default.
+
+## Repository Layout
+
+```text
+skills/
+  add-velociraptor-mapped-client/
+    SKILL.md
+    scripts/
+      add_mapped_client.sh
+  prep-dfir-tools/
+    SKILL.md
+    scripts/
+      prep_dfir_tools.sh
+  detect-dfir-collection-type/
+    SKILL.md
+    scripts/
+      detect_collection.py
+```
 
 ## Skills
 
-### 1. `skills/download_dfir_tools.sh` – Download DFIR Tools
+### 1. Prep DFIR Tools
 
-Downloads the latest versions of common open-source DFIR tools for **Linux** and
-**macOS**:
+Path: `skills/prep-dfir-tools/`
 
-| Tool | Source |
-|------|--------|
-| [Velociraptor](https://github.com/Velocidex/velociraptor) | Pre-built binary for Linux/macOS (amd64 & arm64) |
-| [Volatility 3](https://github.com/volatilityfoundation/volatility3) | Source archive with auto pip dependency install |
-| [The Sleuth Kit (TSK)](https://github.com/sleuthkit/sleuthkit) | Source tarball (Linux) / Homebrew (macOS) |
+Purpose:
 
-#### Usage
+- Prepare common DFIR tools for macOS and Linux hosts.
+- Supports Velociraptor, Volatility 3, and Sleuth Kit.
+- Bootstraps the repo-local `./venv` automatically when Python is available.
+- Installs Python support for the Velociraptor API and broader Volatility 3
+  plugin coverage during prep.
 
-```bash
-chmod +x skills/download_dfir_tools.sh
-
-# Download all tools to ./dfir-tools (default)
-./skills/download_dfir_tools.sh
-
-# Download to a custom directory
-./skills/download_dfir_tools.sh -d /opt/dfir
-
-# Download only Velociraptor
-./skills/download_dfir_tools.sh -t velociraptor
-
-# Download only Volatility 3
-./skills/download_dfir_tools.sh -t volatility
-
-# Download only The Sleuth Kit
-./skills/download_dfir_tools.sh -t tsk
-```
-
-**Requirements:** `curl`, `tar` (standard on Linux and macOS).
-
----
-
-### 2. `skills/detect_collection.py` – Detect DFIR Collection Type
-
-Identifies the type of DFIR artefact or collection present on disk.
-
-Supported types:
-
-| Type | Description |
-|------|-------------|
-| `live_response` | Folder containing typical live-response artefacts (process lists, network connections, services, registry exports, etc.) |
-| `disk_image` | Raw or forensic disk image (`.img`, `.dd`, `.e01`, `.vmdk`, `.vhd`, `.vhdx`, `.qcow2`, `.iso`, etc.) |
-| `memory_image` | Raw physical memory capture (`.mem`, `.vmem`, `.raw`, Windows PAGEDUMP, ELF core) |
-| `process_dump` | Process memory / mini-dump file (`.dmp`, `.mdmp`, Windows Minidump, ELF core) |
-| `mixed_folder` | Folder containing multiple collection types |
-| `unknown` | Could not determine type |
-
-Detection uses **magic bytes** (highest confidence) followed by file-extension
-heuristics. Folder detection uses both content scanning and filename keyword
-analysis.
-
-#### Usage
+Run:
 
 ```bash
-# Inspect a single file
-python3 skills/detect_collection.py /evidence/memory.mem
-
-# Inspect a directory
-python3 skills/detect_collection.py /cases/case001/
-
-# Inspect multiple paths at once
-python3 skills/detect_collection.py /evidence/disk.e01 /evidence/live_response/
-
-# Verbose mode (show detection details)
-python3 skills/detect_collection.py -v /cases/case001/
-
-# JSON output (useful for scripting/pipelines)
-python3 skills/detect_collection.py --json /evidence/
+./skills/prep-dfir-tools/scripts/prep_dfir_tools.sh
 ```
 
-**Requirements:** Python 3.6+ (no third-party packages required).
+Examples:
 
----
+```bash
+./skills/prep-dfir-tools/scripts/prep_dfir_tools.sh -d /opt/dfir
+./skills/prep-dfir-tools/scripts/prep_dfir_tools.sh -t venv
+./skills/prep-dfir-tools/scripts/prep_dfir_tools.sh -t velociraptor
+```
 
-## Planned Skills
+Velociraptor runtime pattern:
 
-- Additional tool downloads (as requested)
-- Collection processing helpers
+```bash
+cd velociraptor
+./velociraptor gui -v --datastore=. --nobrowser --noclient
+./velociraptor config api_client --name api --role administrator api_client.yaml
+```
+
+The prep script now bootstraps that workspace automatically by starting local
+GUI mode, waiting up to 10 seconds for the workspace config, generating
+`api_client.yaml`, and importing `Server.Import.Extras`,
+`Server.Import.ArtifactExchange`, and `Server.Import.DetectRaptor` through the
+API user before stopping the temporary server.
+It also removes the default sample tenant block so the local workspace stays on
+the root org only. Outbound HTTPS access is required for the extra artifact
+import step.
+
+### 2. Add Velociraptor Mapped Client
+
+Path: `skills/add-velociraptor-mapped-client/`
+
+Purpose:
+
+- Reuse or start the local Velociraptor GUI workspace.
+- Generate a dead-disk remapping for an offline Windows image or mounted
+  Windows directory.
+- Launch a background mapped client so the evidence appears in GUI mode.
+- Derive the mapped client hostname from the image or folder name unless `-n`
+  is provided explicitly.
+
+Run:
+
+```bash
+./skills/add-velociraptor-mapped-client/scripts/add_mapped_client.sh /path/to/image.E01
+```
+
+Examples:
+
+```bash
+./skills/add-velociraptor-mapped-client/scripts/add_mapped_client.sh /cases/host01.E01
+./skills/add-velociraptor-mapped-client/scripts/add_mapped_client.sh -n dead-disk-lab01 /mnt/windows
+```
+
+Each mapped client gets its own `client.config.yaml` and writeback file under
+`./velociraptor/mapped-clients/<name>/` so the displayed hostname remains tied
+to that image or folder instead of reusing a shared client identity.
+
+### 3. Detect DFIR Collection Type
+
+Path: `skills/detect-dfir-collection-type/`
+
+Purpose:
+
+- Detect whether a path contains a disk image, memory image, process dump,
+  live-response collection, mixed folder, or an unknown artefact set.
+
+Run:
+
+```bash
+python3 ./skills/detect-dfir-collection-type/scripts/detect_collection.py /path/to/evidence
+```
+
+Examples:
+
+```bash
+python3 ./skills/detect-dfir-collection-type/scripts/detect_collection.py -v /cases/case001
+python3 ./skills/detect-dfir-collection-type/scripts/detect_collection.py --json /evidence
+```
+
+## Notes
+
+- `SKILL.md` files describe when and how to use each skill.
+- The executable logic for each skill lives only under that skill's `scripts/`
+  directory.
+- Root repo defaults and execution guidance live in `config.md`, `agents.md`,
+  and `requirements.txt`.

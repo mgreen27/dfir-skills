@@ -3,9 +3,15 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+# Repo-local virtual environment
+venv/
 
-# Download output directory (created by download_dfir_tools.sh)
+# Tool staging outputs (created by prep_dfir_tools.sh)
+velociraptor/
+volatility3/
 dfir-tools/
+data/
+.cache/
 
 # macOS
 .DS_Store
