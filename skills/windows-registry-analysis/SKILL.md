@@ -52,8 +52,8 @@ Full category set, only when explicitly needed:
 Confirm the target client is online:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format json \
   "SELECT client_id, os_info.hostname as Hostname, timestamp(epoch=last_seen_at) as LastSeen FROM clients() WHERE os_info.hostname =~ '^base-file$' OR os_info.fqdn =~ '^base-file$' ORDER BY LastSeen DESC LIMIT 1"
@@ -62,8 +62,8 @@ cd /Users/matt/git/dfir-skills/velociraptor
 Review prior Registry Hunter flows, newest first:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format json \
   "SELECT session_id, timestamp(epoch=create_time) as Created, state, total_collected_rows, request.specs[0].artifact as ArtifactName, request.specs[0].parameters.env as Params FROM flows(client_id='C.7c663bb1358359cf') WHERE request.specs[0].artifact = 'Windows.Registry.Hunter' ORDER BY create_time DESC"
@@ -72,15 +72,15 @@ cd /Users/matt/git/dfir-skills/velociraptor
 Create the output folder:
 
 ```bash
-mkdir -p /Users/matt/git/dfir-skills/investigations/shieldbase-intrusion/evidence/systems/base-file/velociraptor/registry-hunter
+mkdir -p ./investigations/shieldbase-intrusion/evidence/systems/base-file/velociraptor/registry-hunter
 ```
 
 Run the system-information wave:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
-  --definitions /Users/matt/git/dfir-skills/velociraptor/artifact_definitions \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
+  --definitions ./artifact_definitions \
   --runas api \
   artifacts collect Windows.Registry.Hunter \
   --client_id C.7c663bb1358359cf \
@@ -92,9 +92,9 @@ cd /Users/matt/git/dfir-skills/velociraptor
 Run the investigation-specific wave:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
-  --definitions /Users/matt/git/dfir-skills/velociraptor/artifact_definitions \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
+  --definitions ./artifact_definitions \
   --runas api \
   artifacts collect Windows.Registry.Hunter \
   --client_id C.7c663bb1358359cf \
@@ -106,35 +106,35 @@ cd /Users/matt/git/dfir-skills/velociraptor
 Fetch the main result scope:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format jsonl \
   "SELECT * FROM source(client_id='C.7c663bb1358359cf', flow_id='F.<flow_id>', artifact='Windows.Registry.Hunter/Results')" \
-  > /Users/matt/git/dfir-skills/investigations/shieldbase-intrusion/evidence/systems/base-file/velociraptor/registry-hunter/base-file-registry-hunter-results.jsonl
+  > ../investigations/shieldbase-intrusion/evidence/systems/base-file/velociraptor/registry-hunter/base-file-registry-hunter-results.jsonl
 ```
 
 Fetch the supporting scopes when needed:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format jsonl \
   "SELECT * FROM source(client_id='C.7c663bb1358359cf', flow_id='F.<flow_id>', artifact='Windows.Registry.Hunter/Rules')" \
-  > /Users/matt/git/dfir-skills/investigations/shieldbase-intrusion/evidence/systems/base-file/velociraptor/registry-hunter/base-file-registry-hunter-rules.jsonl
+  > ../investigations/shieldbase-intrusion/evidence/systems/base-file/velociraptor/registry-hunter/base-file-registry-hunter-rules.jsonl
 
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format jsonl \
   "SELECT * FROM source(client_id='C.7c663bb1358359cf', flow_id='F.<flow_id>', artifact='Windows.Registry.Hunter/Globs')" \
-  > /Users/matt/git/dfir-skills/investigations/shieldbase-intrusion/evidence/systems/base-file/velociraptor/registry-hunter/base-file-registry-hunter-globs.jsonl
+  > ../investigations/shieldbase-intrusion/evidence/systems/base-file/velociraptor/registry-hunter/base-file-registry-hunter-globs.jsonl
 
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format jsonl \
   "SELECT * FROM source(client_id='C.7c663bb1358359cf', flow_id='F.<flow_id>', artifact='Windows.Registry.Hunter/Remapping')" \
-  > /Users/matt/git/dfir-skills/investigations/shieldbase-intrusion/evidence/systems/base-file/velociraptor/registry-hunter/base-file-registry-hunter-remapping.jsonl
+  > ../investigations/shieldbase-intrusion/evidence/systems/base-file/velociraptor/registry-hunter/base-file-registry-hunter-remapping.jsonl
 ```
 
 Sync the investigation after the outputs land:

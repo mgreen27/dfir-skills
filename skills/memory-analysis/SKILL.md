@@ -59,16 +59,15 @@ Set reusable shell variables first:
 ```bash
 INVESTIGATION_ID=shieldbase-intrusion
 SYSTEM_NAME=base-dc
-MEMORY_IMAGE=/Users/matt/git/dfir-skills/data/base-dc-memory.img
-mkdir -p /Users/matt/git/dfir-skills/volatility3-cache
-mkdir -p "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/dumps"
-/Users/matt/git/dfir-skills/skills/investigation/scripts/init_investigation.sh "$INVESTIGATION_ID"
+MEMORY_IMAGE=./data/base-dc-memory.img
+mkdir -p ./volatility3-cache
+mkdir -p "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/dumps"
+./skills/investigation/scripts/init_investigation.sh "$INVESTIGATION_ID"
 ```
 
 Collect basic OS and kernel details:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./volatility3/vol.py -f "$MEMORY_IMAGE" \
   --offline \
   --cache-path ./volatility3-cache \
@@ -80,7 +79,6 @@ cd /Users/matt/git/dfir-skills
 List processes:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./volatility3/vol.py -f "$MEMORY_IMAGE" \
   --offline \
   --cache-path ./volatility3-cache \
@@ -92,7 +90,6 @@ cd /Users/matt/git/dfir-skills
 Recover processes with the scan-based plugin:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./volatility3/vol.py -f "$MEMORY_IMAGE" \
   --offline \
   --cache-path ./volatility3-cache \
@@ -104,7 +101,6 @@ cd /Users/matt/git/dfir-skills
 Show the process tree:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./volatility3/vol.py -f "$MEMORY_IMAGE" \
   --offline \
   --cache-path ./volatility3-cache \
@@ -116,7 +112,6 @@ cd /Users/matt/git/dfir-skills
 Collect command lines:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./volatility3/vol.py -f "$MEMORY_IMAGE" \
   --offline \
   --cache-path ./volatility3-cache \
@@ -128,7 +123,6 @@ cd /Users/matt/git/dfir-skills
 Review network sockets:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./volatility3/vol.py -f "$MEMORY_IMAGE" \
   --offline \
   --cache-path ./volatility3-cache \
@@ -154,7 +148,6 @@ python volatility3/vol.py -f data/base-dc-memory.img windows.netscan
 Repo-local equivalents with the prepared venv:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./volatility3/vol.py -f "$MEMORY_IMAGE" \
   --offline \
   --cache-path ./volatility3-cache \
@@ -177,7 +170,6 @@ Interpretation guidance:
 Review suspicious injected memory regions and dump them:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./volatility3/vol.py -f "$MEMORY_IMAGE" \
   --offline \
   --cache-path ./volatility3-cache \
@@ -190,7 +182,6 @@ cd /Users/matt/git/dfir-skills
 Target a specific process later if needed:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./volatility3/vol.py -f "$MEMORY_IMAGE" \
   --offline \
   --cache-path ./volatility3-cache \

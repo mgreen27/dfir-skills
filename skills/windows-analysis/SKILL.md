@@ -1,6 +1,6 @@
 ---
 name: windows-analysis
-description: Run Windows-focused Velociraptor analysis artifacts against a mapped or live client, especially DetectRaptor and built-in Windows event-log artifacts. Use when you need an investigation overview, want to list Windows artifacts for follow-up work, inspect a specific artifact definition, or run a bounded DetectRaptor.Windows.Detection.Evtx test through the local Velociraptor API.
+description: Run Windows-focused Velociraptor analysis artifacts against a mapped or live client. Use when you need an investigation overview, want to list Windows artifacts for follow-up work, inspect a specific artifact definition, or run a bounded DetectRaptor.Windows.Detection.Evtx test through the local Velociraptor API.
 ---
 
 # Windows Analysis
@@ -120,16 +120,16 @@ the matching investigation wiki for iterative analysis.
 List Windows and DetectRaptor artifacts for investigation:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts list '^DetectRaptor\.Windows\.|^Windows\.'
 ```
 
 Confirm the mapped or live client is online before analysis:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format json \
   "SELECT client_id, os_info.hostname as Hostname, timestamp(epoch=last_seen_at) as LastSeen FROM clients() WHERE os_info.hostname =~ '^base-dc$' OR os_info.fqdn =~ '^base-dc$' ORDER BY LastSeen DESC LIMIT 1"
@@ -142,15 +142,15 @@ server.
 Narrow the list to likely first-pass triage artifacts:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts list '^DetectRaptor\.Windows\.Detection\.|^Windows\.EventLogs\.'
 ```
 
 Review evidence-of-execution artifact descriptions before collecting:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
+cd ./velociraptor
 for artifact in \
   Windows.Detection.Amcache \
   Windows.Forensics.Bam \
@@ -160,7 +160,7 @@ for artifact in \
   Windows.System.AppCompatPCA \
   Windows.Forensics.Prefetch
 do
-  ./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+  ./velociraptor --config ./server.config.yaml \
     artifacts show "$artifact"
 done
 ```
@@ -168,31 +168,31 @@ done
 Inspect a deeper-dive evidence-of-execution artifact:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts show Windows.NTFS.MFT
 ```
 
 Inspect a targeted follow-up hunting artifact:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts show Windows.Search.FileFinder
 ```
 
 Inspect the broad registry follow-up artifact:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts show Windows.Registry.Hunter
 ```
 
 Inspect persistence-focused follow-up artifacts:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
+cd ./velociraptor
 for artifact in \
   Windows.Sys.StartupItems \
   Windows.System.Services \
@@ -200,7 +200,7 @@ for artifact in \
   Windows.Registry.TaskCache.HiddenTasks \
   Windows.Remediation.ScheduledTasks
 do
-  ./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+  ./velociraptor --config ./server.config.yaml \
     artifacts show "$artifact"
 done
 ```
@@ -208,56 +208,56 @@ done
 Inspect a generic Yara follow-up artifact:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts show DetectRaptor.Generic.Detection.YaraFile
 ```
 
 Inspect the webshell-focused Yara artifact:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts show DetectRaptor.Generic.Detection.YaraWebshell
 ```
 
 Inspect the browser-extension follow-up artifact:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts show DetectRaptor.Generic.Detection.BrowserExtensions
 ```
 
 Inspect the suspicious-binary follow-up artifact:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts show Windows.Detection.BinaryHunter
 ```
 
 Inspect a specific artifact before running it:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts show DetectRaptor.Windows.Detection.Evtx
 ```
 
 Inspect the initial MFT-driven DetectRaptor artifact:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+cd ./velociraptor
+./velociraptor --config ./server.config.yaml \
   artifacts show DetectRaptor.Windows.Detection.MFT
 ```
 
 Resolve a hostname to the most recent client id:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format json \
   "SELECT client_id, os_info.hostname as Hostname, os_info.fqdn as Fqdn, timestamp(epoch=last_seen_at) as LastSeen FROM clients() WHERE os_info.hostname =~ '^base-dc$' OR os_info.fqdn =~ '^base-dc$' ORDER BY LastSeen DESC LIMIT 1"
@@ -267,8 +267,8 @@ Review prior collections on the client with timestamps, newest first. This is a
 critical requirement and must not use `LIMIT`:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format json \
   "SELECT session_id, timestamp(epoch=create_time) as Created, state, total_collected_rows, artifacts_with_results, request.specs[0].artifact as ArtifactName FROM flows(client_id='C.6d94a75e45cb9367') ORDER BY create_time DESC"
@@ -280,8 +280,8 @@ checking for an exact artifact-and-parameter match.
 Check whether the same collection already ran with the same parameters:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format json \
   "SELECT session_id, state, timestamp(epoch=create_time) as Created, total_collected_rows, serialize(format='json', item=request.specs[0].parameters) as ParametersJson FROM flows(client_id='C.6d94a75e45cb9367') WHERE request.specs[0].artifact = 'DetectRaptor.Windows.Detection.Evtx' AND serialize(format='json', item=request.specs[0].parameters) =~ 'DateAfter' AND serialize(format='json', item=request.specs[0].parameters) =~ '2018-04-20T00:00:00Z' AND serialize(format='json', item=request.specs[0].parameters) =~ 'DateBefore' AND serialize(format='json', item=request.specs[0].parameters) =~ '2018-04-30T00:00:00Z' AND serialize(format='json', item=request.specs[0].parameters) =~ 'VSSAnalysisAge' AND serialize(format='json', item=request.specs[0].parameters) =~ '0' ORDER BY create_time DESC"
@@ -298,16 +298,16 @@ Set reusable shell variables first:
 INVESTIGATION_ID=shieldbase-intrusion
 SYSTEM_NAME=base-dc
 CLIENT_ID=C.6d94a75e45cb9367
-mkdir -p "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor"
-/Users/matt/git/dfir-skills/skills/investigation/scripts/init_investigation.sh "$INVESTIGATION_ID"
+mkdir -p "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor"
+./skills/investigation/scripts/init_investigation.sh "$INVESTIGATION_ID"
 ```
 
 Queue DetectRaptor EVTX with no date limits by client id:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
-  --definitions /Users/matt/git/dfir-skills/velociraptor/artifact_definitions \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
+  --definitions ./artifact_definitions \
   --runas api \
   artifacts collect DetectRaptor.Windows.Detection.Evtx \
   --client_id "$CLIENT_ID" \
@@ -317,8 +317,8 @@ cd /Users/matt/git/dfir-skills/velociraptor
 Queue BinaryHunter against a suspicious exact path:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   artifacts collect Windows.Detection.BinaryHunter \
   --client_id C.0c88f4ff29f4c938 \
@@ -333,41 +333,41 @@ After the flow finishes, save the server-side results directly into the
 investigation folder. For larger collections, use `jsonl` as the safe default:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format jsonl \
   "SELECT * FROM source(client_id='${CLIENT_ID}', flow_id='F.D7IRINBEJ3OVI', artifact='DetectRaptor.Windows.Detection.Evtx')" \
-  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-detectraptor-evtx.jsonl"
+  > "../investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-detectraptor-evtx.jsonl"
 ```
 
 Save AppCompatCache results directly from a finished flow:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format jsonl \
   "SELECT * FROM source(client_id='${CLIENT_ID}', flow_id='F.D7IRLJON2IIHQ', artifact='Windows.Registry.AppCompatCache')" \
-  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-appcompatcache.jsonl"
+  > "../investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-appcompatcache.jsonl"
 ```
 
 Save BinaryHunter results directly from a finished flow:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   query --format jsonl \
   "SELECT * FROM source(client_id='${CLIENT_ID}', flow_id='F.<flow_id>', artifact='Windows.Detection.BinaryHunter')" \
-  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-binaryhunter-subject-srv.jsonl"
+  > "../investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-binaryhunter-subject-srv.jsonl"
 ```
 
 Example registry-hunter collection for a dead-disk image:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   artifacts collect Windows.Registry.Hunter \
   --client_id C.6d94a75e45cb9367 \
@@ -389,30 +389,30 @@ Troubleshooting:
 Example persistence-review collections for a dead-disk image:
 
 ```bash
-cd /Users/matt/git/dfir-skills/velociraptor
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+cd ./velociraptor
+./velociraptor -a ./api_client.yaml \
   --runas api \
   artifacts collect Windows.Sys.StartupItems \
   --client_id "$CLIENT_ID" \
   --org_id root \
   --format jsonl \
-  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-startupitems.jsonl"
+  > "../investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-startupitems.jsonl"
 
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+./velociraptor -a ./api_client.yaml \
   --runas api \
   artifacts collect Windows.System.TaskScheduler \
   --client_id "$CLIENT_ID" \
   --org_id root \
   --format jsonl \
-  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-taskscheduler.jsonl"
+  > "../investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-taskscheduler.jsonl"
 
-./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+./velociraptor -a ./api_client.yaml \
   --runas api \
   artifacts collect Windows.Registry.TaskCache.HiddenTasks \
   --client_id "$CLIENT_ID" \
   --org_id root \
   --format jsonl \
-  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-hidden-tasks.jsonl"
+  > "../investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-hidden-tasks.jsonl"
 ```
 
 Default investigation layout:

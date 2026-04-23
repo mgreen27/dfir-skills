@@ -75,15 +75,15 @@ investigations/<investigation_id>/
 Create the case folder for an investigation:
 
 ```bash
-/Users/matt/git/dfir-skills/skills/investigation/scripts/init_investigation.sh shieldbase-intrusion
+./skills/investigation/scripts/init_investigation.sh shieldbase-intrusion
 ```
 
 Create the case folder with an explicit investigation path:
 
 ```bash
-/Users/matt/git/dfir-skills/skills/investigation/scripts/init_investigation.sh \
+./skills/investigation/scripts/init_investigation.sh \
   shieldbase-intrusion \
-  /Users/matt/git/dfir-skills/investigations/shieldbase-intrusion
+  ./investigations/shieldbase-intrusion
 ```
 
 ## Notes

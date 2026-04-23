@@ -235,6 +235,15 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def epoch_to_iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(value), tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OSError):
+        return None
+
+
 def encode_url_for_vt(url: str) -> str:
     encoded = base64.urlsafe_b64encode(url.encode("utf-8")).decode("ascii")
     return encoded.rstrip("=")
@@ -373,6 +382,200 @@ def fetch_relationships(
     return fetched
 
 
+def _safe_get(mapping: dict[str, Any], *keys: str) -> Any:
+    current: Any = mapping
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def summarize_detection_results(attributes: dict[str, Any], limit: int = 10) -> list[dict[str, Any]]:
+    results = attributes.get("last_analysis_results", {})
+    if not isinstance(results, dict):
+        return []
+
+    scored: list[tuple[tuple[int, int, str], dict[str, Any]]] = []
+    for engine, details in results.items():
+        if not isinstance(details, dict):
+            continue
+        category = str(details.get("category") or "undetected")
+        result = details.get("result")
+        if category in {"malicious", "suspicious"}:
+            priority = 0
+        elif result:
+            priority = 1
+        else:
+            priority = 2
+        scored.append(
+            (
+                (priority, 0 if result else 1, engine.lower()),
+                {
+                    "engine": engine,
+                    "category": category,
+                    "result": result,
+                    "method": details.get("method"),
+                },
+            )
+        )
+
+    scored.sort(key=lambda item: item[0])
+    return [item[1] for item in scored[:limit]]
+
+
+def summarize_relationship_item(item: dict[str, Any]) -> dict[str, Any]:
+    attributes = item.get("attributes", {}) if isinstance(item.get("attributes"), dict) else {}
+    stats = attributes.get("last_analysis_stats", {}) if isinstance(attributes.get("last_analysis_stats"), dict) else {}
+    summary: dict[str, Any] = {
+        "id": item.get("id"),
+        "type": item.get("type"),
+        "name": (
+            attributes.get("meaningful_name")
+            or attributes.get("name")
+            or (attributes.get("names") or [None])[0]
+        ),
+    }
+
+    for field in ("type_tag", "type_description", "size", "magic", "origin", "description", "status", "collection_type"):
+        value = attributes.get(field)
+        if value not in (None, "", [], {}):
+            summary[field] = value
+
+    if stats:
+        summary["last_analysis_stats"] = {
+            "malicious": stats.get("malicious", 0),
+            "suspicious": stats.get("suspicious", 0),
+            "undetected": stats.get("undetected", 0),
+        }
+
+    if attributes.get("tags"):
+        summary["tags"] = list(attributes.get("tags", []))[:5]
+
+    if attributes.get("popular_threat_classification"):
+        ptc = attributes["popular_threat_classification"]
+        if isinstance(ptc, dict):
+            summary["suggested_threat_label"] = ptc.get("suggested_threat_label")
+
+    if attributes.get("alt_names"):
+        summary["alt_names"] = list(attributes.get("alt_names", []))[:3]
+
+    for epoch_field in ("first_submission_date", "last_submission_date", "last_seen", "first_seen_itw_date", "last_seen_itw_date"):
+        iso_value = epoch_to_iso(attributes.get(epoch_field))
+        if iso_value:
+            summary[epoch_field] = iso_value
+
+    return summary
+
+
+def summarize_relationships(relationships: dict[str, Any], limit: int = 5) -> dict[str, Any]:
+    summarized: dict[str, Any] = {}
+    for relationship_name, payload in relationships.items():
+        if not isinstance(payload, dict):
+            continue
+        if "error" in payload:
+            summarized[relationship_name] = {"error": payload["error"]}
+            continue
+        data = payload.get("data")
+        if isinstance(data, list):
+            summarized[relationship_name] = {
+                "count": len(data),
+                "items": [summarize_relationship_item(item) for item in data[:limit] if isinstance(item, dict)],
+            }
+        elif isinstance(data, dict):
+            summarized[relationship_name] = {
+                "count": 1,
+                "items": [summarize_relationship_item(data)],
+            }
+        else:
+            summarized[relationship_name] = {"count": 0, "items": []}
+    return summarized
+
+
+def build_file_gui_link(file_id: str | None) -> str | None:
+    if not file_id:
+        return None
+    return f"https://www.virustotal.com/gui/file/{file_id}/"
+
+
+def build_file_report_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    report_data = _safe_get(payload, "report", "data") or {}
+    if not isinstance(report_data, dict):
+        raise VirusTotalClientError("Unexpected file report shape for summary output")
+    attributes = report_data.get("attributes", {})
+    if not isinstance(attributes, dict):
+        raise VirusTotalClientError("Unexpected file report attributes for summary output")
+
+    report_id = report_data.get("id")
+    stats = attributes.get("last_analysis_stats", {}) if isinstance(attributes.get("last_analysis_stats"), dict) else {}
+    ptc = attributes.get("popular_threat_classification", {}) if isinstance(attributes.get("popular_threat_classification"), dict) else {}
+    severity = attributes.get("threat_severity", {}) if isinstance(attributes.get("threat_severity"), dict) else {}
+
+    def top_values(entries: Any, key: str = "value", limit: int = 5) -> list[str]:
+        if not isinstance(entries, list):
+            return []
+        values: list[str] = []
+        for entry in entries[:limit]:
+            if isinstance(entry, dict) and entry.get(key):
+                values.append(str(entry[key]))
+        return values
+
+    summary = {
+        "tool": payload.get("tool"),
+        "retrieved_at": payload.get("retrieved_at"),
+        "input": payload.get("input"),
+        "file_link": build_file_gui_link(report_id),
+        "summary": {
+            "id": report_id,
+            "meaningful_name": attributes.get("meaningful_name"),
+            "type_description": attributes.get("type_description"),
+            "verdict": "malicious" if stats.get("malicious", 0) else ("suspicious" if stats.get("suspicious", 0) else "not_flagged"),
+            "analysis": {
+                "malicious": stats.get("malicious", 0),
+                "suspicious": stats.get("suspicious", 0),
+                "undetected": stats.get("undetected", 0),
+                "harmless": stats.get("harmless", 0),
+                "failure": stats.get("failure", 0),
+                "type_unsupported": stats.get("type-unsupported", 0),
+            },
+            "reputation": attributes.get("reputation"),
+            "threat_severity_level": severity.get("threat_severity_level"),
+            "threat_severity_summary": severity.get("level_description"),
+            "suggested_threat_label": ptc.get("suggested_threat_label"),
+            "threat_categories": top_values(ptc.get("popular_threat_category")),
+            "family_labels": top_values(ptc.get("popular_threat_name")),
+            "tags": list(attributes.get("tags", []))[:10],
+        },
+        "details_summary": {
+            "sha256": attributes.get("sha256") or report_id,
+            "sha1": attributes.get("sha1"),
+            "md5": attributes.get("md5"),
+            "size": attributes.get("size"),
+            "type_tag": attributes.get("type_tag"),
+            "type_extension": attributes.get("type_extension"),
+            "magika": attributes.get("magika"),
+            "magic": attributes.get("magic"),
+            "meaningful_name": attributes.get("meaningful_name"),
+            "names": list(attributes.get("names", []))[:10],
+            "downloadable": attributes.get("downloadable"),
+            "times_submitted": attributes.get("times_submitted"),
+            "total_votes": attributes.get("total_votes"),
+        },
+        "telemetry_summary": {
+            "first_submission_date": epoch_to_iso(attributes.get("first_submission_date")),
+            "last_submission_date": epoch_to_iso(attributes.get("last_submission_date")),
+            "first_seen_itw_date": epoch_to_iso(attributes.get("first_seen_itw_date")),
+            "last_seen_itw_date": epoch_to_iso(attributes.get("last_seen_itw_date")),
+            "last_analysis_date": epoch_to_iso(attributes.get("last_analysis_date")),
+            "last_modification_date": epoch_to_iso(attributes.get("last_modification_date")),
+            "unique_sources": attributes.get("unique_sources"),
+        },
+        "top_detections": summarize_detection_results(attributes, limit=10),
+        "relations": summarize_relationships(payload.get("relationships", {}) if isinstance(payload.get("relationships"), dict) else {}, limit=5),
+    }
+    return summary
+
+
 def poll_analysis(client: VirusTotalClient, analysis_id: str, timeout: int, interval: int) -> Any:
     deadline = time.time() + timeout
     last_response: Any = None
@@ -461,13 +664,16 @@ def handle_get_file_report(args: argparse.Namespace) -> Any:
         DEFAULT_FILE_REPORT_RELATIONSHIPS,
         limit=args.relationship_limit,
     )
-    return {
+    payload = {
         "tool": "get_file_report",
         "retrieved_at": now_utc(),
         "input": {"hash": args.hash},
         "report": basic_report,
         "relationships": relationships,
     }
+    if args.raw:
+        return payload
+    return build_file_report_summary(payload)
 
 
 def handle_get_file_relationship(args: argparse.Namespace) -> Any:
@@ -601,6 +807,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_command_args(file_report)
     file_report.add_argument("--hash", required=True, type=validate_hash, help="MD5, SHA-1, or SHA-256 hash")
     file_report.add_argument("--relationship-limit", type=int, default=DEFAULT_RELATIONSHIP_LIMIT, help="Per-relationship fetch limit")
+    file_report.add_argument(
+        "--raw",
+        action="store_true",
+        help="Return the full raw VirusTotal payload instead of the default compact file summary",
+    )
     file_report.set_defaults(handler=handle_get_file_report)
 
     file_rel = subparsers.add_parser("get_file_relationship", help="Get a specific file relationship")

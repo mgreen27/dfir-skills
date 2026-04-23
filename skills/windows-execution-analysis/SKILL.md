@@ -37,7 +37,6 @@ The curated artifact set is:
 Run the full execution-evidence sweep for the current case systems:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./skills/windows-execution-analysis/scripts/run_windows_execution_analysis.py \
   --investigation-id shieldbase-intrusion \
   --host base-dc \
@@ -47,7 +46,6 @@ cd /Users/matt/git/dfir-skills
 Rerun and force fresh collections instead of reusing finished flows:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./venv/bin/python ./skills/windows-execution-analysis/scripts/run_windows_execution_analysis.py \
   --investigation-id shieldbase-intrusion \
   --host base-dc \
@@ -57,7 +55,6 @@ cd /Users/matt/git/dfir-skills
 Sync the investigation after the outputs land:
 
 ```bash
-cd /Users/matt/git/dfir-skills
 ./skills/investigation-ingest/scripts/sync_investigation.sh shieldbase-intrusion
 ```
 

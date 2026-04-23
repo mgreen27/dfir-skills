@@ -11,7 +11,8 @@ from openpyxl.utils import get_column_letter
 
 
 HEADER_FILL = PatternFill(fill_type="solid", fgColor="1F4E78")
-HEADER_FONT = Font(color="FFFFFF", bold=True)
+HEADER_FONT = Font(color="FFFFFF", bold=True, size=14)
+BODY_FONT = Font(size=14)
 ALT_FILL = PatternFill(fill_type="solid", fgColor="EAF2F8")
 WRAP_ALIGNMENT = Alignment(vertical="top", wrap_text=True)
 SHEET_ORDER = [
@@ -64,6 +65,7 @@ def build_sheet(workbook: Workbook, sheet_name: str, rows: list[list[str]]) -> N
                 for cell in ws[row_idx]:
                     cell.fill = ALT_FILL
             for cell in ws[row_idx]:
+                cell.font = BODY_FONT
                 cell.alignment = WRAP_ALIGNMENT
 
         ws.freeze_panes = "A2"

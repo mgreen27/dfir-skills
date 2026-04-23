@@ -30,15 +30,15 @@ up-to-date Spreadsheet of Doom links, and a root-level XLSX export.
 Sync the default investigation case:
 
 ```bash
-/Users/matt/git/dfir-skills/skills/investigation-ingest/scripts/sync_investigation.sh shieldbase-intrusion
+./skills/investigation-ingest/scripts/sync_investigation.sh shieldbase-intrusion
 ```
 
 Sync a case with an explicit investigation path:
 
 ```bash
-/Users/matt/git/dfir-skills/skills/investigation-ingest/scripts/sync_investigation.sh \
+./skills/investigation-ingest/scripts/sync_investigation.sh \
   shieldbase-intrusion \
-  /Users/matt/git/dfir-skills/investigations/shieldbase-intrusion
+  ./investigations/shieldbase-intrusion
 ```
 
 ## Notes
