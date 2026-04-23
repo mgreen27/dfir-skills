@@ -13,6 +13,8 @@ GUI_LOG="${WORKSPACE_DIR}/gui.log"
 GUI_PID_FILE="${WORKSPACE_DIR}/gui.pid"
 GUI_WAIT_SECONDS=20
 CLIENT_INFO_WAIT_SECONDS=30
+SUPERVISOR_LOOP_SECONDS=15
+STALE_SECONDS=90
 
 EVIDENCE_PATH=""
 HOSTNAME_OVERRIDE=""
@@ -246,6 +248,7 @@ write_session_file() {
     local client_config="$5"
     local client_info_file="$6"
     local client_info_status="$7"
+    local supervisor_pid="${8-}"
 
     {
         write_env_line "CLIENT_NAME" "$client_name"
@@ -257,6 +260,9 @@ write_session_file() {
         write_env_line "STARTED_AT" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
         write_env_line "CLIENT_INFO_FILE" "$client_info_file"
         write_env_line "CLIENT_INFO_STATUS" "$client_info_status"
+        write_env_line "SUPERVISOR_PID" "$supervisor_pid"
+        write_env_line "SUPERVISOR_LOOP_SECONDS" "$SUPERVISOR_LOOP_SECONDS"
+        write_env_line "STALE_SECONDS" "$STALE_SECONDS"
     } >"$session_file"
 }
 
@@ -361,38 +367,54 @@ start_mapped_client() {
     local client_config="$4"
     local client_log="${client_dir}/client.log"
     local client_pid_file="${client_dir}/client.pid"
+    local supervisor_pid_file="${client_dir}/supervisor.pid"
+    local supervisor_log="${client_dir}/supervisor.log"
     local session_file="${client_dir}/session.env"
     local client_info_file="${client_dir}/client-info.json"
     local client_info_status="pending"
     local existing_pid=""
+    local supervisor_pid=""
 
-    if [ -f "$client_pid_file" ]; then
-        existing_pid="$(cat "$client_pid_file" 2>/dev/null || true)"
-        if [ -n "$existing_pid" ] && kill -0 "$existing_pid" >/dev/null 2>&1; then
-            info "Mapped client ${client_name} is already running with PID ${existing_pid}"
+    if [ -f "$supervisor_pid_file" ]; then
+        supervisor_pid="$(cat "$supervisor_pid_file" 2>/dev/null || true)"
+        if [ -n "$supervisor_pid" ] && kill -0 "$supervisor_pid" >/dev/null 2>&1; then
+            existing_pid="$(cat "$client_pid_file" 2>/dev/null || true)"
+            info "Mapped client supervisor for ${client_name} is already running with PID ${supervisor_pid}"
             if wait_for_client_info "$client_name" "$client_dir"; then
                 client_info_status="found"
             fi
-            write_session_file "$session_file" "$client_name" "$remap_file" "$existing_pid" "$client_config" "$client_info_file" "$client_info_status"
+            write_session_file "$session_file" "$client_name" "$remap_file" "$existing_pid" "$client_config" "$client_info_file" "$client_info_status" "$supervisor_pid"
             return 0
         fi
     fi
 
-    info "Starting mapped Velociraptor client: ${client_name}"
+    info "Starting mapped Velociraptor client supervisor: ${client_name}"
     (
         cd "$WORKSPACE_DIR"
-        nohup ./velociraptor client -v --config "$client_config" --remap "$remap_file" >"$client_log" 2>&1 &
-        echo "$!" >"$client_pid_file"
+        nohup bash "${SCRIPT_DIR}/supervise_mapped_client.sh" \
+            "$WORKSPACE_DIR" \
+            "$client_name" \
+            "$client_dir" \
+            "$client_config" \
+            "$remap_file" \
+            "$API_CLIENT_CONFIG" \
+            "$SUPERVISOR_LOOP_SECONDS" \
+            "$STALE_SECONDS" >"$supervisor_log" 2>&1 &
+        echo "$!" >"$supervisor_pid_file"
+        disown "$!" 2>/dev/null || true
     )
 
     sleep 2
 
-    local client_pid
-    client_pid="$(cat "$client_pid_file")"
-    if ! kill -0 "$client_pid" >/dev/null 2>&1; then
-        warn "Mapped client process exited early. Check: ${client_log}"
+    supervisor_pid="$(cat "$supervisor_pid_file")"
+    if ! kill -0 "$supervisor_pid" >/dev/null 2>&1; then
+        warn "Mapped client supervisor exited early. Check: ${supervisor_log}"
         return 1
     fi
+
+    sleep 2
+    local client_pid=""
+    client_pid="$(cat "$client_pid_file" 2>/dev/null || true)"
 
     if wait_for_client_info "$client_name" "$client_dir"; then
         client_info_status="found"
@@ -400,8 +422,13 @@ start_mapped_client() {
         warn "Client info was not available yet for ${client_name}. Check: ${client_dir}/client-info.log"
     fi
 
-    write_session_file "$session_file" "$client_name" "$remap_file" "$client_pid" "$client_config" "$client_info_file" "$client_info_status"
-    success "Mapped client ${client_name} is running with PID ${client_pid}"
+    write_session_file "$session_file" "$client_name" "$remap_file" "$client_pid" "$client_config" "$client_info_file" "$client_info_status" "$supervisor_pid"
+    success "Mapped client ${client_name} is supervised by PID ${supervisor_pid}"
+    if [ -n "$client_pid" ]; then
+        info "Current client PID: ${client_pid}"
+    fi
+    info "Supervisor log: ${supervisor_log}"
+    info "Client log: ${client_log}"
 }
 
 build_remap() {
@@ -462,3 +489,4 @@ success "Mapped client ready. Open $(gui_url) and look for host: ${CLIENT_NAME}"
 info "Client workspace: ${CLIENT_DIR}"
 info "Client config: ${CLIENT_RUNTIME_CONFIG}"
 info "Client log: ${CLIENT_DIR}/client.log"
+info "Supervisor log: ${CLIENT_DIR}/supervisor.log"

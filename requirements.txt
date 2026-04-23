@@ -1,7 +1,9 @@
 # Root Python dependencies for repo maintenance, validation, and DFIR API use.
 # The prep skill installs these into the repo-local ./venv when available.
 # The DFIR collection detector itself does not require third-party packages.
+# The VirusTotal skill currently uses only the Python standard library.
 PyYAML>=6.0,<7.0
 grpcio==1.73.0
 grpcio-tools==1.73.0
 pyvelociraptor>=0.1.8
+openpyxl>=3.1,<4.0

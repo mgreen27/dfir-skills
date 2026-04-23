@@ -15,7 +15,9 @@ directory to the local Velociraptor workspace.
 3. Reuse the existing GUI instance if it is already listening.
 4. Start local GUI mode if it is not already running.
 5. Generate a remapping file for the evidence.
-6. Launch a background Velociraptor client with that remap.
+6. Launch a supervised background Velociraptor client with that remap.
+7. Keep the client online by watching both the local PID and the Velociraptor
+   `LastSeen` timestamp.
 
 ## Commands
 
@@ -59,6 +61,9 @@ That folder contains:
 - `client-info.log`
 - `client.log`
 - `client.pid`
+- `client-status.env`
+- `supervisor.log`
+- `supervisor.pid`
 - `session.env`
 
 The GUI log lives at:
@@ -79,6 +84,9 @@ The GUI log lives at:
 - Each mapped client gets its own `client.config.yaml`, temp directory, and
   writeback file so the image name can map to a stable Velociraptor hostname
   instead of reusing a shared client identity.
+- The client now runs under a local supervisor loop. If the mapped client
+  process dies or the API `LastSeen` value goes stale, the supervisor restarts
+  it automatically.
 - The script looks up the enrolled client through `api_client.yaml` using a
   `clients()` VQL query that reads the client record populated by
   `Generic.Client.Info/BasicInformation`, then writes the result to

@@ -11,10 +11,11 @@ the repo-local Volatility 3 checkout.
 ## Workflow
 
 1. Confirm the memory image path.
-2. Create or reuse `./investigations/<investigation-name>/volatility3/`.
+2. Create or reuse
+   `./investigations/<investigation-name>/evidence/systems/<system>/volatility3/`.
 3. Create or reuse `./volatility3-cache/` before running Volatility commands.
 4. Create or reuse the matching investigation wiki under
-   `./investigation-wikis/<investigation-name>/`.
+   `./investigations/<investigation-name>/wiki/`.
 5. Keep iterative analysis in the investigation wiki, not flat case markdown
    files.
 6. Prefer `.txt` outputs for Volatility results so they are easy to grep,
@@ -28,6 +29,11 @@ the repo-local Volatility 3 checkout.
    scan-based plugins as the more reliable source for that image.
 11. When plugin behavior is inconsistent, rerun with `-vvv` to check for page
     faults, smear, or other image-read issues.
+12. After each memory collection step, update the investigation wiki with what
+    was answered and what still needs clarification.
+13. In a first-pass DFIR review, record potentially malicious memory-resident
+    processes, command lines, network artefacts, or injected regions in
+    `wiki/suspicious-artifacts.md` before they are fully resolved.
 
 ## Analyst Lens
 
@@ -48,18 +54,15 @@ evidence is insufficient, say so clearly.
 
 ## Commands
 
-Create the investigation layout:
+Set reusable shell variables first:
 
 ```bash
-mkdir -p /Users/matt/git/dfir-skills/volatility3-cache
-mkdir -p /Users/matt/git/dfir-skills/investigations/base-dc/volatility3/dumps
-/Users/matt/git/dfir-skills/skills/investigation-wiki/scripts/init_investigation_wiki.sh base-dc
-```
-
-Set a reusable shell variable for the memory image:
-
-```bash
+INVESTIGATION_ID=shieldbase-intrusion
+SYSTEM_NAME=base-dc
 MEMORY_IMAGE=/Users/matt/git/dfir-skills/data/base-dc-memory.img
+mkdir -p /Users/matt/git/dfir-skills/volatility3-cache
+mkdir -p "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/dumps"
+/Users/matt/git/dfir-skills/skills/investigation/scripts/init_investigation.sh "$INVESTIGATION_ID"
 ```
 
 Collect basic OS and kernel details:
@@ -71,7 +74,7 @@ cd /Users/matt/git/dfir-skills
   --cache-path ./volatility3-cache \
   -r pretty \
   windows.info \
-  > ./investigations/base-dc/volatility3/windows.info.txt
+  > "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/windows.info.txt"
 ```
 
 List processes:
@@ -83,7 +86,7 @@ cd /Users/matt/git/dfir-skills
   --cache-path ./volatility3-cache \
   -r pretty \
   windows.pslist \
-  > ./investigations/base-dc/volatility3/windows.pslist.txt
+  > "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/windows.pslist.txt"
 ```
 
 Recover processes with the scan-based plugin:
@@ -95,7 +98,7 @@ cd /Users/matt/git/dfir-skills
   --cache-path ./volatility3-cache \
   -r pretty \
   windows.psscan \
-  > ./investigations/base-dc/volatility3/windows.psscan.txt
+  > "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/windows.psscan.txt"
 ```
 
 Show the process tree:
@@ -107,7 +110,7 @@ cd /Users/matt/git/dfir-skills
   --cache-path ./volatility3-cache \
   -r pretty \
   windows.pstree \
-  > ./investigations/base-dc/volatility3/windows.pstree.txt
+  > "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/windows.pstree.txt"
 ```
 
 Collect command lines:
@@ -119,7 +122,7 @@ cd /Users/matt/git/dfir-skills
   --cache-path ./volatility3-cache \
   -r pretty \
   windows.cmdline \
-  > ./investigations/base-dc/volatility3/windows.cmdline.txt
+  > "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/windows.cmdline.txt"
 ```
 
 Review network sockets:
@@ -131,7 +134,7 @@ cd /Users/matt/git/dfir-skills
   --cache-path ./volatility3-cache \
   -r pretty \
   windows.netscan \
-  > ./investigations/base-dc/volatility3/windows.netscan.txt
+  > "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/windows.netscan.txt"
 ```
 
 ## Diagnostics
@@ -152,13 +155,13 @@ Repo-local equivalents with the prepared venv:
 
 ```bash
 cd /Users/matt/git/dfir-skills
-./venv/bin/python ./volatility3/vol.py -f ./data/base-dc-memory.img \
+./venv/bin/python ./volatility3/vol.py -f "$MEMORY_IMAGE" \
   --offline \
   --cache-path ./volatility3-cache \
   -vvv \
   windows.psscan \
-  > ./investigations/base-dc/volatility3/windows.psscan.vvv.txt \
-  2> ./investigations/base-dc/volatility3/windows.psscan.vvv.err
+  > "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/windows.psscan.vvv.txt" \
+  2> "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/windows.psscan.vvv.err"
 ```
 
 Interpretation guidance:
@@ -179,9 +182,9 @@ cd /Users/matt/git/dfir-skills
   --offline \
   --cache-path ./volatility3-cache \
   -r pretty \
-  -o ./investigations/base-dc/volatility3/dumps \
+  -o "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/dumps" \
   windows.malfind --dump \
-  > ./investigations/base-dc/volatility3/windows.malfind.txt
+  > "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/windows.malfind.txt"
 ```
 
 Target a specific process later if needed:
@@ -193,7 +196,7 @@ cd /Users/matt/git/dfir-skills
   --cache-path ./volatility3-cache \
   -r pretty \
   windows.dlllist --pid 1234 \
-  > ./investigations/base-dc/volatility3/windows.dlllist.pid-1234.txt
+  > "./investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/volatility3/windows.dlllist.pid-1234.txt"
 ```
 
 ## Notes
@@ -203,5 +206,7 @@ cd /Users/matt/git/dfir-skills
 - Prefer text output files for memory triage unless a later workflow requires
   `json` or `jsonl`.
 - Keep dumped artifacts inside the investigation-specific `dumps/` folder.
-- After refreshing memory outputs, run the investigation-wiki ingest skill so
-  the per-host Obsidian vault stays current.
+- After refreshing memory outputs, run the investigation-ingest skill so
+  the investigation `wiki/` folder stays current.
+- Use open questions in the wiki to decide the next memory plugin to run rather
+  than collecting blindly.

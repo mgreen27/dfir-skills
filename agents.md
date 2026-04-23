@@ -23,14 +23,18 @@ that help prepare tooling, classify evidence, and support downstream analysis.
 9. Keep learnings short, dated, and directly useful to the next agent run.
 10. Treat the unbounded `flows()` inventory query as a critical investigation
     requirement. Do not add `LIMIT` to the canonical prior-flow review query.
-11. Treat `./investigation-wikis/<hostname>/` as the default durable analysis
-    record for iterative casework.
-12. Keep raw tool outputs under `./investigations/<hostname>/` and use the
-    investigation wiki for narrative analysis, leads, timeline, and evidence
-    review.
-13. If an investigation wiki exists, update its `wiki/` pages instead of
-    keeping flat `investigation-notes.md` and `investigation-results.md`
-    files.
+11. Treat `./investigations/<investigation_id>/wiki/` as the default durable
+    narrative analysis record for iterative casework.
+12. Treat `./investigations/<investigation_id>/spreadsheet-of-doom/` as the
+    canonical structured case record for the investigation.
+13. Keep raw tool outputs under
+    `./investigations/<investigation_id>/evidence/systems/<system>/` and use
+    the investigation wiki plus Spreadsheet of Doom for iterative review.
+14. Refresh the Spreadsheet of Doom CSVs first, then regenerate the
+    root-level `<investigation_id>_SoD.xlsx` workbook.
+15. The default analysis objective is a full DFIR review of the provided
+    evidence, with explicit highlighting of all potentially malicious
+    artifacts before deeper workflow-based review begins.
 
 ## DFIR Analysis Prompt
 
@@ -48,8 +52,105 @@ interpretation caveats for artifacts like AppCompatCache, UserAssist, Amcache,
 BAM, Prefetch, and event-log detections. Produce a concise analyst narrative
 with: executive summary, key findings, confidence, gaps, and next
 investigative actions. Prefer exact paths, timestamps, usernames, hostnames,
-process names, command lines, artifact names, and vault page references. If
+process names, command lines, artifact names, and wiki page references. If
 evidence is insufficient, say so clearly.
+
+## Iterative Investigation Prompt
+
+Use this prompt when the goal is to iteratively collect, analyze, and update
+the investigation wiki:
+
+You are a senior DFIR analyst working iteratively from two primary evidence
+sources: disk analysis through Velociraptor and memory analysis through
+Volatility 3. Your job is not only to summarize findings, but to drive the
+investigation forward.
+
+Start from the current investigation wiki and the latest raw outputs under
+`./investigations/<investigation_id>/`. Read the wiki first to understand the
+current analysis, Spreadsheet of Doom status, evidence notes, and open
+questions. Then decide
+whether the next best step is:
+
+1. write or refine analysis in the wiki based on evidence already collected
+2. collect additional evidence from Velociraptor disk artifacts
+3. collect additional evidence from Volatility memory plugins
+4. do both in sequence when the wiki reveals a specific open question that can
+   be answered by more collection
+
+When writing to the wiki:
+- update `wiki/analysis.md` for confirmed findings, confidence, caveats, and
+  next actions
+- update the relevant Spreadsheet of Doom CSVs for structured case facts
+- update `wiki/hot.md` with the current case position and active threads
+
+When collecting more evidence:
+- prefer Velociraptor for disk, registry, NTFS, event log, scheduled task, and
+  file-presence questions
+- prefer Volatility 3 for process, parent-child, command-line, network, and
+  memory-resident execution questions
+- when a suspicious binary path is identified on disk, run
+  `Windows.Detection.BinaryHunter` against the exact path and capture hashes,
+  signer details, PE metadata, PDB path, and import-hash information
+- check whether equivalent collections already exist before rerunning them
+- save all new raw outputs under
+  `./investigations/<investigation_id>/evidence/systems/<system>/`
+- sync the investigation wiki after new collection results land
+
+Use an explicit loop:
+- identify the open question
+- choose the best evidence source
+- collect only what is needed to answer that question
+- update the wiki with what changed
+- state the next unresolved question if one remains
+
+Do not treat the wiki as a static report. Treat the investigation wiki plus
+Spreadsheet of Doom as the working case file that should both guide collection
+and absorb the results of each new analysis step.
+
+## Full DFIR Workflow Prompt
+
+Use this prompt when the goal is a full DFIR analysis of the provided evidence:
+
+You are a senior DFIR analyst performing a full investigation over the
+evidence provided for a host or case. Your immediate objective is to identify,
+record, and prioritize all potentially malicious artifacts or behaviors across
+the main evidence sources:
+
+- disk evidence through Velociraptor
+- memory evidence through Volatility 3
+
+Start broad, then narrow:
+
+1. perform an initial full-pass review of the available evidence
+2. identify suspicious binaries, persistence mechanisms, credential-access
+   indicators, remote-execution artifacts, defense-evasion activity, staging
+   paths, suspicious user activity, and timeline anomalies
+3. write those items into the investigation wiki and Spreadsheet of Doom as
+   potential malicious artifacts, confirmed findings, leads, caveats, and
+   timeline events
+4. decide which workflow should review each suspicious item more deeply
+5. collect more evidence only when needed to answer a specific open question
+
+When running this workflow:
+- prefer broad triage first, then targeted pivots
+- treat suspicious binaries as a standard targeted pivot: use
+  `Windows.Detection.BinaryHunter` to turn a path-based lead into a file
+  identity record with hashes, signer details, and PE metadata
+- highlight all potentially malicious artifacts even when confidence is still
+  low
+- clearly separate:
+  - confirmed malicious findings
+  - suspicious leads requiring review
+  - benign or explained artifacts
+- use the investigation wiki and Spreadsheet of Doom to maintain a durable
+  suspicious-artifact and task-review queue that later workflows can consume
+
+The end state of a good first-pass DFIR analysis is not just a narrative. It
+is a structured case file that shows:
+- what looks malicious
+- why it looks suspicious
+- what evidence supports it
+- what workflow should review it next
 
 ## Execution Learnings
 
@@ -104,6 +205,15 @@ evidence is insufficient, say so clearly.
 - Velociraptor prep should initialize the local workspace automatically by
   running `gui -v --datastore=. --nobrowser --noclient` for 10 seconds, then
   stopping it and generating `api_client.yaml`.
+
+### 2026-04-20
+
+- On dead-disk Velociraptor clients, exact `Windows.Search.FileFinder` globs
+  are an efficient way to validate EVTX hypotheses and can be saved directly as
+  durable case `.jsonl` outputs.
+- Investigation records can drift behind live collection state; refresh
+  `analysis.md`, `spreadsheet-of-doom.md`, and `hot.md` after major
+  collection waves rather than relying on the initial scaffold narrative.
 - Before attempting dead-disk remapping, verify the evidence path is a real
   image and not a placeholder or stub file; the current `data/base-dc-cdrive.E01`
   in this worktree is only a 17-byte text file and cannot be mounted.
@@ -137,6 +247,23 @@ evidence is insufficient, say so clearly.
   workspace.
 - The mapped-client skill now defaults the hostname to the exact image or
   folder basename, without the old `dead-disk-` prefix.
+- Mapped dead-disk clients should be supervised, not launched as a one-shot
+  background process. Watch both the local client PID and the API `LastSeen`
+  timestamp, and restart stale clients automatically so long-running
+  collections do not silently stall when the mapped client exits.
+- In the Codex command-runner environment, detached background mapped-client
+  supervisors can still be reaped when the launching command exits. For
+  durable long-running analysis, run the mapped-client supervisor under a
+  host-native service manager such as `launchd` on macOS or `systemd` on
+  Linux.
+- The repo now has a dedicated `windows-registry-analysis` skill for
+  `Windows.Registry.Hunter`. In this workflow, `RemappingStrategy='None'` is
+  the hard requirement and the main review output comes from the `Results`
+  scope (`Windows.Registry.Hunter/Results`).
+- Registry Hunter output is large enough that the default collection pattern
+  should be split into a system-information wave and an
+  investigation-specific wave, with results saved under
+  `./investigations/<investigation_id>/evidence/systems/<system>/velociraptor/registry-hunter/`.
 - Velociraptor prep now strips the default sample tenant block from
   `server.config.yaml` and removes `orgs/O123*`, so rebuilt workspaces stay
   root-only unless the user explicitly adds tenants later.
@@ -158,13 +285,13 @@ evidence is insufficient, say so clearly.
   metadata; instead it should query `clients()` through `api_client.yaml` and
   treat the `Generic.Client.Info/BasicInformation` record as the source of
   client identity details.
-- The repo now includes a `windows_analysis` skill for listing
+- The repo now includes a `windows-analysis` skill for listing
   Windows/DetectRaptor artifacts and running API-backed collections such as
   `DetectRaptor.Windows.Detection.Evtx` against a hostname or client id.
 - Windows-analysis style collections should prefer durable investigation output
   folders under the analysis root when the results are likely to be reviewed in
   multiple passes or chunked for later context management.
-- The `windows_analysis` skill is command-first: keep the canonical
+- The `windows-analysis` skill is command-first: keep the canonical
   Velociraptor CLI and VQL commands in `SKILL.md` instead of hiding simple
   workflows behind an extra wrapper script.
 - The Windows investigation overview should explicitly cover
@@ -196,10 +323,10 @@ evidence is insufficient, say so clearly.
 - Prior collection review should start with a latest-first `flows()` query that
   includes readable `Created` and `LastActive` timestamps so the newest runs
   can be triaged before checking for an exact parameter match.
-- Windows analysis results should be written into the machine investigation
-  folder under `./investigations/<hostname>/`, while iterative analyst work
-  should be captured in the matching Obsidian vault under
-  `./investigation-wikis/<hostname>/`.
+- Windows analysis results should be written under
+  `./investigations/<investigation_id>/evidence/systems/<system>/`, while
+  iterative analyst work should be captured in the matching investigation
+  `wiki/` folder under `./investigations/<investigation_id>/wiki/`.
 - Do not add date limits to Windows analysis collections unless the user
   explicitly asks for a bounded time window.
 - When queueing DetectRaptor artifacts through the API CLI, pass the local
@@ -235,21 +362,152 @@ evidence is insufficient, say so clearly.
   rerun with `-vvv` and preserve the debug stderr. `windows.netscan` is also
   often still worth running because it scans memory structures directly.
 - The repo now includes DFIR-specific Obsidian skills for scaffolding,
-  ingesting, and querying per-host investigation vaults under
-  `./investigation-wikis/`.
-- Investigation wikis are the default system of record for iterative analysis.
-  Legacy `investigation-notes.md` and `investigation-results.md` files should
-  be migrated into the vault and then retired.
+  ingesting, and querying investigation-centric case folders under
+  `./investigations/`.
+- Investigation wikis plus the Spreadsheet of Doom are the default system of
+  record for iterative analysis.
 - The main goal of the Obsidian workflow is iterative analysis: keep raw
-  outputs in `./investigations/`, but accumulate analyst judgement, timeline
-  refinement, and artifact interpretation in the host wiki.
-- The investigation-wiki scaffold creates the vault structure and an `evidence`
-  symlink back to `./investigations/<hostname>/`, while the ingest skill builds
-  file-level artifact notes under `wiki/artifacts/` and refreshes the hot
-  cache.
+  outputs in `./investigations/`, but accumulate analyst judgement, task
+  refinement, and artifact interpretation in the investigation wiki while the
+  Spreadsheet of Doom holds the structured case record.
+- The investigation scaffold now creates a single case root with sibling
+  `wiki/`, `spreadsheet-of-doom/`, and `evidence/` folders, while the ingest
+  skill builds file-level artifact notes under `wiki/artifacts/` and refreshes
+  the hot cache without re-indexing the wiki itself.
 - When generating markdown from shell here-doc templates, escape literal
   backticks. Unescaped markdown code spans can trigger shell command
   substitution and break the sync workflow.
-- Command-first skills such as `windows_analysis` and `memory-analysis` do not
+- Command-first skills such as `windows-analysis` and `memory-analysis` do not
   need empty `scripts/` directories. Only keep `scripts/` when a skill ships
   real helper files.
+- The repo now has an explicit iterative-investigation prompt: start from the
+  wiki, decide whether the next step is more writing or more collection, then
+  sync the new results back into the wiki so the loop can continue.
+- The investigation wiki is not just an output destination. It is allowed to
+  surface open questions that trigger additional Velociraptor or Volatility
+  collection before the next wiki update.
+- The default DFIR workflow goal is now a full initial evidence review that
+  highlights all potentially malicious artifacts and leaves a structured queue
+  for later workflow-specific review.
+- The investigation scaffold should carry the same iterative analysis
+  loop as the repo guide so each case folder can both absorb analysis updates
+  and drive follow-up collection from open questions.
+- When Velociraptor is rebuilt, kill every stale `velociraptor` process before
+  testing the API client. Old GUI processes can survive a folder rebuild and
+  cause TLS/API certificate mismatches against the fresh workspace.
+- For a fresh Volatility 3 checkout, the first memory-analysis pass may need
+  online symbol downloads before `windows.info` and `windows.psscan` can run.
+  After the cache is populated, the repo-local `volatility3-cache/` can be
+  reused for repeatable follow-up runs.
+- The default first-pass Windows triage set should include
+  `DetectRaptor.Windows.Detection.MFT`, not just later `Windows.NTFS.MFT`
+  follow-up, so suspicious-file coverage starts in the initial collection wave.
+- The evidence-of-execution workflow now includes `Windows.System.AppCompatPCA`
+  as a launch-evidence artifact. Keep its interpretation caveat attached: it is
+  useful where the PCA dictionary exists, but it is not universal execution
+  coverage.
+- `Windows.Registry.Hunter` should be treated as a large, follow-up registry
+  sweep rather than a default first-pass collection. For dead-disk work, use
+  `RemappingStrategy='None'` and narrowed category filters so the run is useful
+  without being unnecessarily expensive.
+- On this `base-dc` image, `Windows.System.TaskScheduler` surfaced a real
+  `vssadmin Create Shadow` task authored by `shieldbase\\rsydow-a`, while
+  `Windows.Sys.StartupItems` looked routine and
+  `Windows.Registry.TaskCache.HiddenTasks` returned `0` rows.
+- Shared cross-host indicators should live in the investigation Spreadsheet of
+  Doom plus the case `wiki/`, instead of a separate top-level wiki tree.
+- `Windows.Detection.BinaryHunter` is a good exact-path follow-up for
+  suspicious binaries on dead-disk clients. On the current `subject_srv.exe`
+  sample it produced stable cross-host hashes, signer details, PE version
+  data, and the PDB path `E:\fresponse\x86_MT\F-Response Subjects\subject_srv.pdb`.
+- When writing wiki findings or suspicious-artifact entries, keep the full
+  command line instead of shortening with `...`; the exact arguments often
+  carry the forensic context that later analysis depends on.
+- `Windows.Registry.Hunter` with `RemappingStrategy='None'` is effective for
+  dead-disk casework when split into system and investigation waves, and it
+  can confirm service registrations, firewall rules, share mappings, and user
+  context that other first-pass artifacts may miss.
+- On the current `base-dc` and `base-file` images, Registry Hunter elevated
+  `subject_srv.exe` from an execution lead to a confirmed cross-host automatic
+  service (`F-Response Subject`) with a shared controller endpoint
+  `base-hunt.shieldbase.lan:5682`.
+- The Windows analysis workflow should treat `Windows.Detection.BinaryHunter`
+  as the default exact-path follow-up for suspicious binaries so the case
+  record captures hashes, signer details, PE metadata, imports, and PDB/build
+  clues before later TI enrichment.
+- On the current case, `subject_srv.exe` was clarified as a legitimate
+  F-Response DFIR component. Treat signed remote-response tooling as a
+  potential false positive for malware classification unless the question is
+  authorization or misuse of legitimate tooling.
+- The repo now includes a VirusTotal skill that mirrors the referenced
+  `mcp-virustotal` report and relationship tool surface through a repo-local
+  Python CLI, using `VIRUSTOTAL_API_KEY` first and then
+  `./virustotal-config.json` as the credential fallback.
+- VirusTotal enrichment in this repo should skip obviously internal domains and
+  treat RFC1918 private IPs as low-value by default. In the case IOC tracker,
+  use explicit `TI Status` values such as enriched, skipped as internal, or
+  unsupported VT object type instead of leaving indicators as `Not checked`.
+- The case scaffold is now investigation-centric and spreadsheet-first. Use
+  one investigation root per investigation id, one Spreadsheet of Doom under
+  `./investigations/<investigation_id>/spreadsheet-of-doom/`, and track
+  individual hosts in `systems.csv` rather than creating one separate case
+  folder per host.
+- For case structure, use CSV as the durable source of truth and treat XLSX as
+  an optional convenience export only.
+- In the case layout, keep `wiki/`, `spreadsheet-of-doom/`, and `evidence/`
+  as siblings under the investigation root, and regenerate
+  `<investigation_id>_SoD.xlsx` after each sync so analysts can open the
+  workbook directly.
+- The sync workflow should index only `evidence/` and
+  `spreadsheet-of-doom/`, not the entire investigation root, otherwise it will
+  recursively ingest its own wiki pages as evidence.
+
+### 2026-04-23
+
+- The primary case record is now investigation-centric and spreadsheet-first:
+  update Spreadsheet of Doom CSVs before updating wiki narrative pages.
+- Keep `wiki/`, `spreadsheet-of-doom/`, and `evidence/` as siblings under the
+  investigation root so the structured case record is easier to reach than the
+  raw artifact tree.
+- Each sync should regenerate `<investigation_id>_SoD.xlsx` in the
+  investigation root for analyst-friendly review, while CSV remains
+  the canonical format.
+- The investigation record is investigation-centric. The canonical structured
+  case record lives in Spreadsheet of Doom CSVs under
+  `./investigations/<investigation_id>/spreadsheet-of-doom/`, while raw
+  per-system outputs live under `evidence/systems/<system>/`.
+- For durable case structure, prefer CSV as the source of truth and treat XLSX
+  as an optional convenience export rather than the canonical repository
+  format.
+- The separate `./investigation-wikis/` tree has been retired. Keep the wiki
+  directly under `./investigations/<investigation_id>/wiki/`.
+- After case consolidation, remove legacy per-host investigation folders such
+  as old `base-dc`, `base-file`, or `shared` trees so the active case root is
+  the only durable investigation record under `./investigations/`.
+- The Spreadsheet of Doom workbook export naming convention is now
+  `<investigation_id>_SoD.xlsx`.
+- Prefer the shorter `investigation`, `investigation-ingest`, and
+  `investigation-query` skill names, and keep command examples
+  investigation-centric by using reusable variables like
+  `INVESTIGATION_ID`, `SYSTEM_NAME`, and `CLIENT_ID`.
+- The repo now includes a `windows-execution-analysis` skill for the core
+  Velociraptor evidence-of-execution set:
+  `Windows.Detection.Amcache`, `Windows.Forensics.Bam`,
+  `Windows.Forensics.Timeline`, `Windows.Registry.UserAssist`,
+  `Windows.Registry.AppCompatCache`, `Windows.System.AppCompatPCA`, and
+  `Windows.Forensics.Prefetch`.
+- Execution-analysis outputs should land under
+  `./investigations/<investigation_id>/evidence/systems/<system>/velociraptor/execution-analysis/`
+  with a per-host `execution-analysis-manifest.tsv` so later review can see
+  flow reuse, row counts, and output paths without reopening every JSONL file.
+- On the current `shieldbase-intrusion` case, the execution-analysis sweep
+  reused finished flows where available and only queued missing artifacts for
+  `base-file`; `base-dc` produced useful Amcache, UserAssist, and
+  AppCompatCache rows, while BAM, Timeline, AppCompatPCA, and Prefetch were
+  sparse or empty on both mapped dead-disk clients.
+- In the current case, the highest-value IOC enrichment pattern was exact-path
+  `Windows.Detection.BinaryHunter` followed by VirusTotal file lookup. That
+  clarified `msadvapi2_32.exe` and `msadvapi2_64.exe` as unsigned binaries
+  with `wormhole-windows` PDB paths, while downgrading
+  `officedeploymenttool_9326.3600.exe` and `Mnemosyne.sys` to likely benign
+  context.

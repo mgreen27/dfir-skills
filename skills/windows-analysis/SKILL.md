@@ -1,5 +1,5 @@
 ---
-name: windows_analysis
+name: windows-analysis
 description: Run Windows-focused Velociraptor analysis artifacts against a mapped or live client, especially DetectRaptor and built-in Windows event-log artifacts. Use when you need an investigation overview, want to list Windows artifacts for follow-up work, inspect a specific artifact definition, or run a bounded DetectRaptor.Windows.Detection.Evtx test through the local Velociraptor API.
 ---
 
@@ -18,10 +18,13 @@ against a Velociraptor client.
 5. Check whether the same collection has already been run with the same parameters.
 6. List or inspect available artifacts before running broader collections.
 7. Create or reuse an investigation folder for saved outputs. `./investigations/<investigation-name>/` is the default pattern for durable raw outputs that will be chunked or re-reviewed later.
-8. Create or reuse the matching investigation wiki under `./investigation-wikis/<investigation-name>/` for iterative analysis.
-9. Keep analyst reasoning in the investigation wiki pages, especially `wiki/findings.md`, `wiki/timeline.md`, `wiki/leads.md`, and `wiki/evidence.md`.
+8. Create or reuse the matching investigation wiki under `./investigations/<investigation-name>/wiki/` for iterative analysis.
+9. Keep analyst reasoning in the investigation wiki pages, especially `wiki/findings.md`, `wiki/suspicious-artifacts.md`, `wiki/timeline.md`, `wiki/leads.md`, and `wiki/evidence.md`.
 10. By default, run collections without date limits unless the user explicitly asks for a bounded time window.
 11. Treat unbounded prior-flow review as a critical requirement. Do not add a `LIMIT` to the canonical `flows()` inventory query when reviewing prior collections for analysis.
+12. After each meaningful collection wave, decide whether the new evidence answers an existing wiki question or creates a new one, then update the wiki accordingly.
+13. In a first-pass DFIR review, explicitly record all potentially malicious disk-side artifacts in `wiki/suspicious-artifacts.md`, even when they are still only leads.
+14. When a suspicious binary path is identified, run `Windows.Detection.BinaryHunter` against the exact path and record the resulting hashes, signer details, PE version data, imports, PDB path, and timestamp metadata in the investigation wiki.
 
 ## Investigation Overview
 
@@ -36,6 +39,10 @@ Start with these artifact families during Windows triage:
 - `DetectRaptor.Windows.Detection.Powershell.PSReadline`
   Use for PowerShell command-history review when you need operator activity or
   hands-on-keyboard evidence.
+- `DetectRaptor.Windows.Detection.MFT`
+  Use for an initial DetectRaptor pass over MFT-backed file activity when you
+  want filename- and path-driven suspicious-file coverage early in the case,
+  rather than waiting for a later pivot.
 - `Windows.EventLogs.EvtxHunter`
   Use when you already have a string, path, event id, or IOC regex and want a
   direct event-log hunt.
@@ -68,6 +75,10 @@ This is mandatory because several of these artifacts have important caveats.
   Use for shimcache-style path and compatibility evidence. On Windows 10+ an
   execution flag of `1` indicates execution, but execution semantics are weaker
   on older Windows versions.
+- `Windows.System.AppCompatPCA`
+  Use for Program Compatibility Assistant launch records. Treat it as launch
+  evidence where the PCA dictionary exists, but not as universal execution
+  coverage across all Windows versions or all binaries.
 - `Windows.Forensics.Prefetch`
   Use for strong binary execution leads, including multiple run timestamps on
   newer Windows versions, where Prefetch is present and enabled.
@@ -79,6 +90,13 @@ For deeper-dive follow-up work:
   artifact summaries
 - use `Windows.Search.FileFinder` to target known paths, filenames, extensions,
   or IOC patterns once you have a lead from EVTX, Amcache, Prefetch, or MFT
+- use `Windows.Registry.Hunter` when you need a broad registry-centric
+  follow-up sweep for persistence, user-activity, autoruns, services, threat
+  hunting, or program-execution clues that were not fully explained by the
+  lighter first-pass artifacts
+- use `Windows.Detection.BinaryHunter` when a suspicious binary path needs
+  exact file identity, hashes, signer details, PE metadata, imports, or
+  PDB/build-path clues
 - use `DetectRaptor.Generic.Detection.YaraFile` when you want content-based
   file triage against suspicious paths or recovered files
 - use `DetectRaptor.Generic.Detection.YaraWebshell` when your follow-up work
@@ -86,6 +104,9 @@ For deeper-dive follow-up work:
 - use `DetectRaptor.Generic.Detection.BrowserExtensions` when you need a quick
   view of installed browser add-ons that may explain credential theft,
   persistence, or suspicious user activity
+- use `Windows.System.TaskScheduler`, `Windows.Sys.StartupItems`, and
+  `Windows.Registry.TaskCache.HiddenTasks` for persistence-focused follow-up
+  on dead-disk clients
 - list likely artifacts first with `artifacts list`
 - inspect parameters with `artifacts show <name>`
 - then run a bounded collection
@@ -136,6 +157,7 @@ for artifact in \
   Windows.Forensics.Timeline \
   Windows.Registry.UserAssist \
   Windows.Registry.AppCompatCache \
+  Windows.System.AppCompatPCA \
   Windows.Forensics.Prefetch
 do
   ./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
@@ -157,6 +179,30 @@ Inspect a targeted follow-up hunting artifact:
 cd /Users/matt/git/dfir-skills/velociraptor
 ./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
   artifacts show Windows.Search.FileFinder
+```
+
+Inspect the broad registry follow-up artifact:
+
+```bash
+cd /Users/matt/git/dfir-skills/velociraptor
+./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+  artifacts show Windows.Registry.Hunter
+```
+
+Inspect persistence-focused follow-up artifacts:
+
+```bash
+cd /Users/matt/git/dfir-skills/velociraptor
+for artifact in \
+  Windows.Sys.StartupItems \
+  Windows.System.Services \
+  Windows.System.TaskScheduler \
+  Windows.Registry.TaskCache.HiddenTasks \
+  Windows.Remediation.ScheduledTasks
+do
+  ./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+    artifacts show "$artifact"
+done
 ```
 
 Inspect a generic Yara follow-up artifact:
@@ -183,12 +229,28 @@ cd /Users/matt/git/dfir-skills/velociraptor
   artifacts show DetectRaptor.Generic.Detection.BrowserExtensions
 ```
 
+Inspect the suspicious-binary follow-up artifact:
+
+```bash
+cd /Users/matt/git/dfir-skills/velociraptor
+./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+  artifacts show Windows.Detection.BinaryHunter
+```
+
 Inspect a specific artifact before running it:
 
 ```bash
 cd /Users/matt/git/dfir-skills/velociraptor
 ./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
   artifacts show DetectRaptor.Windows.Detection.Evtx
+```
+
+Inspect the initial MFT-driven DetectRaptor artifact:
+
+```bash
+cd /Users/matt/git/dfir-skills/velociraptor
+./velociraptor --config /Users/matt/git/dfir-skills/velociraptor/server.config.yaml \
+  artifacts show DetectRaptor.Windows.Detection.MFT
 ```
 
 Resolve a hostname to the most recent client id:
@@ -230,11 +292,14 @@ reuse the prior results before queueing another identical collection. Adapt the
 artifact name and parameter values in the query to match the collection you are
 about to run.
 
-Create an investigation folder for durable outputs:
+Set reusable shell variables first:
 
 ```bash
-mkdir -p /Users/matt/git/dfir-skills/investigations/base-dc/velociraptor
-/Users/matt/git/dfir-skills/skills/investigation-wiki/scripts/init_investigation_wiki.sh base-dc
+INVESTIGATION_ID=shieldbase-intrusion
+SYSTEM_NAME=base-dc
+CLIENT_ID=C.6d94a75e45cb9367
+mkdir -p "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor"
+/Users/matt/git/dfir-skills/skills/investigation/scripts/init_investigation.sh "$INVESTIGATION_ID"
 ```
 
 Queue DetectRaptor EVTX with no date limits by client id:
@@ -245,8 +310,23 @@ cd /Users/matt/git/dfir-skills/velociraptor
   --definitions /Users/matt/git/dfir-skills/velociraptor/artifact_definitions \
   --runas api \
   artifacts collect DetectRaptor.Windows.Detection.Evtx \
-  --client_id C.6d94a75e45cb9367 \
+  --client_id "$CLIENT_ID" \
   --org_id root
+```
+
+Queue BinaryHunter against a suspicious exact path:
+
+```bash
+cd /Users/matt/git/dfir-skills/velociraptor
+./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+  --runas api \
+  artifacts collect Windows.Detection.BinaryHunter \
+  --client_id C.0c88f4ff29f4c938 \
+  --org_id root \
+  --args TargetGlob='C:/Windows/subject_srv.exe' \
+  --args Accessor='auto' \
+  --args AuthenticodeRegex='.' \
+  --args PEInformationRegex='.'
 ```
 
 After the flow finishes, save the server-side results directly into the
@@ -257,8 +337,8 @@ cd /Users/matt/git/dfir-skills/velociraptor
 ./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
   --runas api \
   query --format jsonl \
-  "SELECT * FROM source(client_id='C.6d94a75e45cb9367', flow_id='F.D7IRINBEJ3OVI', artifact='DetectRaptor.Windows.Detection.Evtx')" \
-  > /Users/matt/git/dfir-skills/investigations/base-dc/velociraptor/base-dc-detectraptor-evtx.jsonl
+  "SELECT * FROM source(client_id='${CLIENT_ID}', flow_id='F.D7IRINBEJ3OVI', artifact='DetectRaptor.Windows.Detection.Evtx')" \
+  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-detectraptor-evtx.jsonl"
 ```
 
 Save AppCompatCache results directly from a finished flow:
@@ -268,21 +348,85 @@ cd /Users/matt/git/dfir-skills/velociraptor
 ./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
   --runas api \
   query --format jsonl \
-  "SELECT * FROM source(client_id='C.6d94a75e45cb9367', flow_id='F.D7IRLJON2IIHQ', artifact='Windows.Registry.AppCompatCache')" \
-  > /Users/matt/git/dfir-skills/investigations/base-dc/velociraptor/base-dc-appcompatcache.jsonl
+  "SELECT * FROM source(client_id='${CLIENT_ID}', flow_id='F.D7IRLJON2IIHQ', artifact='Windows.Registry.AppCompatCache')" \
+  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-appcompatcache.jsonl"
+```
+
+Save BinaryHunter results directly from a finished flow:
+
+```bash
+cd /Users/matt/git/dfir-skills/velociraptor
+./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+  --runas api \
+  query --format jsonl \
+  "SELECT * FROM source(client_id='${CLIENT_ID}', flow_id='F.<flow_id>', artifact='Windows.Detection.BinaryHunter')" \
+  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-binaryhunter-subject-srv.jsonl"
+```
+
+Example registry-hunter collection for a dead-disk image:
+
+```bash
+cd /Users/matt/git/dfir-skills/velociraptor
+./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+  --runas api \
+  artifacts collect Windows.Registry.Hunter \
+  --client_id C.6d94a75e45cb9367 \
+  --org_id root \
+  --args RemappingStrategy='None' \
+  --args CollectionPolicy='None' \
+  --args Categories='["Persistence","Program Execution","Services","Threat Hunting","User Activity"]'
+```
+
+Troubleshooting:
+
+- If `Windows.Registry.Hunter` logs `Unknown filesystem accessor registry` on a
+  dead-disk client, the problem is usually the artifact's
+  `RemappingStrategy`, not the host `remapping.yaml`.
+- For dead-disk images in this repo, rerun it with
+  `RemappingStrategy='None'`, or use the dedicated
+  `windows-registry-analysis` skill directly.
+
+Example persistence-review collections for a dead-disk image:
+
+```bash
+cd /Users/matt/git/dfir-skills/velociraptor
+./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+  --runas api \
+  artifacts collect Windows.Sys.StartupItems \
+  --client_id "$CLIENT_ID" \
+  --org_id root \
+  --format jsonl \
+  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-startupitems.jsonl"
+
+./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+  --runas api \
+  artifacts collect Windows.System.TaskScheduler \
+  --client_id "$CLIENT_ID" \
+  --org_id root \
+  --format jsonl \
+  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-taskscheduler.jsonl"
+
+./velociraptor -a /Users/matt/git/dfir-skills/velociraptor/api_client.yaml \
+  --runas api \
+  artifacts collect Windows.Registry.TaskCache.HiddenTasks \
+  --client_id "$CLIENT_ID" \
+  --org_id root \
+  --format jsonl \
+  > "/Users/matt/git/dfir-skills/investigations/${INVESTIGATION_ID}/evidence/systems/${SYSTEM_NAME}/velociraptor/${SYSTEM_NAME}-hidden-tasks.jsonl"
 ```
 
 Default investigation layout:
 
 ```text
 ./investigations/<investigation-name>/
-  velociraptor/
-    <target>-<artifact>.jsonl
-./investigation-wikis/<investigation-name>/
+  evidence/
+    systems/
+      <target>/
+        velociraptor/
+          <target>-<artifact>.jsonl
   wiki/
-    findings.md
-    timeline.md
-    leads.md
+    analysis.md
+    hot.md
     evidence.md
 ```
 
@@ -300,12 +444,32 @@ Default investigation layout:
   `artifacts list` and `artifacts show`.
 - The default artifact is `DetectRaptor.Windows.Detection.Evtx`.
 - The default result output directory is
-  `./investigations/<investigation-name>/velociraptor/`.
-- Keep `./investigations/<investigation-name>/` for raw outputs only.
-- Keep `./investigation-wikis/<investigation-name>/wiki/` up to date with
-  validated findings, caveats, leads, timeline entries, and next actions.
-- After a collection wave, run the investigation-wiki ingest skill so the
+  `./investigations/<investigation-name>/evidence/systems/<target>/velociraptor/`.
+- Keep the case `wiki/` up to date with validated findings, suspicious
+  artifacts, caveats, leads, timeline entries, and next actions.
+- After a collection wave, run the investigation-ingest skill so the
   artifact index and hot cache reflect the latest raw outputs.
+- Use the updated wiki state to decide whether another targeted collection is
+  needed. The collection workflow and the wiki-writing workflow are meant to
+  feed each other.
+- When a suspicious binary is confirmed or even remains a strong lead, use
+  `Windows.Detection.BinaryHunter` as the standard exact-path follow-up and
+  record the exact file path, MD5, SHA1, SHA256, file version, PE compile
+  timestamp, signer subject and issuer, import hash, notable imports, and PDB
+  path in the case wiki.
+- For dead-disk persistence work, `Windows.System.TaskScheduler` is usually the
+  best on-disk task review artifact. `Windows.Sys.StartupItems` is a good
+  low-cost autorun check, and `Windows.Registry.TaskCache.HiddenTasks` is a
+  targeted check for missing-`SD` hidden-task abuse.
+- `Windows.System.Services` is WMI-backed and can be sparse on dead-disk
+  clients. Treat a `0` row result there as a collection limitation, not a
+  clearing condition.
+- `Windows.Remediation.ScheduledTasks` is primarily a remediation artifact. Use
+  it carefully and do not treat it as a broad scheduled-task discovery source.
+- `Windows.Registry.Hunter` is intentionally a heavyweight follow-up artifact.
+  On dead-disk work in this repo, prefer `RemappingStrategy='None'` and a
+  narrowed category or description filter unless you explicitly want the full
+  sweep.
 - Prefer retrieving finished results with `source(client_id=..., flow_id=...,
   artifact=...)` and saving them as `.jsonl` for durable review. Small outputs
   can still be written as `.json`, but `.jsonl` is the safer default for large
