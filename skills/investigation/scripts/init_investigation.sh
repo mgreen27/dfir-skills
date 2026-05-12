@@ -343,6 +343,10 @@ write_csv_if_missing \
   'Submitted By,Date Added,System Name,IP Address,Domain,System,Role,Operating System,Initial Lead,Significant Findings,Status,Earliest Evidence (UTC),Latest Evidence (UTC),Notes'
 
 write_csv_if_missing \
+  "${SOD_DIR}/asset-map.csv" \
+  'Submitted By,Date Added,Asset ID,Hostname,FQDN,IP Address,Domain,System,Role,Owner/User,Source,Status,Confidence,Notes'
+
+write_csv_if_missing \
   "${SOD_DIR}/users.csv" \
   'Submitted By,Date Added,Source,Account ID,Account Name,SID,Domain,Account Role,Significant Findings,Status,Earliest Evidence (UTC),Latest Evidence (UTC),Notes'
 

@@ -26,6 +26,7 @@ VENV_DIR="${REPO_ROOT}/venv"
 REQUIREMENTS_FILE="${REPO_ROOT}/requirements.txt"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 VELOCIRAPTOR_INIT_SECONDS=10
+VELOCIRAPTOR_API_WAIT_SECONDS=60
 
 DOWNLOAD_DIR="./"
 TOOL="all"
@@ -221,7 +222,7 @@ initialize_velociraptor_workspace() {
     "$binary" --config "$config_file" config api_client --name api --role administrator "$api_client_file" \
         || warn "Could not generate Velociraptor API client config at ${api_client_file}"
 
-    if ! wait_for_velociraptor_api "$workspace_dir" 20; then
+    if ! wait_for_velociraptor_api "$workspace_dir" "$VELOCIRAPTOR_API_WAIT_SECONDS"; then
         warn "Velociraptor API did not become ready during initialization; skipping artifact imports"
     elif check_velociraptor_import_connectivity; then
         collect_velociraptor_server_artifact "$workspace_dir" "Server.Import.Extras" \

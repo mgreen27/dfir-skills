@@ -16,10 +16,9 @@ from typing import Any, Iterable
 from urllib import error, parse, request
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_REPO_CONFIG = REPO_ROOT / "virustotal-config.json"
-DEFAULT_USER_CONFIG = Path.home() / ".config" / "dfir-skills" / "virustotal-config.json"
+DEFAULT_REPO_CONFIG = REPO_ROOT / "config.json"
 DEFAULT_TIMEOUT = 60
-DEFAULT_RELATIONSHIP_LIMIT = 10
+DEFAULT_RELATIONSHIP_LIMIT = 20
 
 URL_RELATIONSHIPS = (
     "analyses",
@@ -261,7 +260,7 @@ def resolve_config(path_override: str | None) -> tuple[dict[str, Any], Path | No
     if path_override:
         candidates.append(Path(path_override).expanduser())
     else:
-        candidates.extend([DEFAULT_REPO_CONFIG, DEFAULT_USER_CONFIG])
+        candidates.append(DEFAULT_REPO_CONFIG)
 
     for candidate in candidates:
         if candidate.exists():
@@ -294,7 +293,7 @@ def build_client(args: argparse.Namespace) -> VirusTotalClient:
         if getattr(args, "config", None):
             searched.append(str(Path(args.config).expanduser()))
         else:
-            searched.extend([str(DEFAULT_REPO_CONFIG), str(DEFAULT_USER_CONFIG)])
+            searched.append(str(DEFAULT_REPO_CONFIG))
         raise VirusTotalClientError(
             "VirusTotal API key not found. Set VIRUSTOTAL_API_KEY or add an api_key "
             f"to one of: {', '.join(searched)}"
@@ -309,6 +308,12 @@ def build_client(args: argparse.Namespace) -> VirusTotalClient:
 
 
 def validate_url(value: str) -> str:
+    value = (
+        value.replace("hxxps://", "https://")
+        .replace("hxxp://", "http://")
+        .replace("[.]", ".")
+        .replace("(.)", ".")
+    )
     parsed = parse.urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise argparse.ArgumentTypeError("must be a valid http or https URL")
@@ -330,9 +335,67 @@ def validate_ip(value: str) -> str:
 
 
 def validate_domain(value: str) -> str:
+    value = value.replace("[.]", ".").replace("(.)", ".")
     if not re.fullmatch(r"([A-Za-z0-9-]+\.)+[A-Za-z]{2,}", value):
         raise argparse.ArgumentTypeError("must be a valid domain name")
     return value.lower()
+
+
+def compact_dict(mapping: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in mapping.items()
+        if value not in (None, "", [], {})
+    }
+
+
+def build_verdict(stats: dict[str, Any]) -> str:
+    if stats.get("malicious", 0):
+        return "malicious"
+    if stats.get("suspicious", 0):
+        return "suspicious"
+    return "not_flagged"
+
+
+def build_analysis_summary(stats: dict[str, Any]) -> dict[str, Any]:
+    return compact_dict(
+        {
+            "malicious": stats.get("malicious", 0),
+            "suspicious": stats.get("suspicious", 0),
+            "undetected": stats.get("undetected", 0),
+            "harmless": stats.get("harmless", 0),
+            "failure": stats.get("failure", 0),
+            "type_unsupported": stats.get("type-unsupported", 0),
+        }
+    )
+
+
+def summarize_certificate(cert: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(cert, dict):
+        return {}
+
+    subject = cert.get("subject", {}) if isinstance(cert.get("subject"), dict) else {}
+    issuer = cert.get("issuer", {}) if isinstance(cert.get("issuer"), dict) else {}
+    validity = cert.get("validity", {}) if isinstance(cert.get("validity"), dict) else {}
+    public_key = cert.get("public_key", {}) if isinstance(cert.get("public_key"), dict) else {}
+    rsa_key = public_key.get("rsa", {}) if isinstance(public_key.get("rsa"), dict) else {}
+    extensions = cert.get("extensions", {}) if isinstance(cert.get("extensions"), dict) else {}
+
+    return compact_dict(
+        {
+            "subject_cn": subject.get("CN"),
+            "subject_org": subject.get("O"),
+            "issuer_cn": issuer.get("CN"),
+            "issuer_org": issuer.get("O"),
+            "thumbprint_sha256": cert.get("thumbprint_sha256"),
+            "serial_number": cert.get("serial_number"),
+            "valid_from": validity.get("not_before"),
+            "valid_to": validity.get("not_after"),
+            "public_key_algorithm": public_key.get("algorithm"),
+            "key_size": rsa_key.get("key_size"),
+            "san": list(extensions.get("subject_alternative_name", []))[:10] if isinstance(extensions.get("subject_alternative_name"), list) else None,
+        }
+    )
 
 
 def write_output(payload: Any, output_path: str | None) -> None:
@@ -498,6 +561,24 @@ def build_file_gui_link(file_id: str | None) -> str | None:
     return f"https://www.virustotal.com/gui/file/{file_id}/"
 
 
+def build_url_gui_link(url_id: str | None) -> str | None:
+    if not url_id:
+        return None
+    return f"https://www.virustotal.com/gui/url/{url_id}/"
+
+
+def build_ip_gui_link(ip_value: str | None) -> str | None:
+    if not ip_value:
+        return None
+    return f"https://www.virustotal.com/gui/ip-address/{ip_value}/"
+
+
+def build_domain_gui_link(domain_value: str | None) -> str | None:
+    if not domain_value:
+        return None
+    return f"https://www.virustotal.com/gui/domain/{domain_value}/"
+
+
 def build_file_report_summary(payload: dict[str, Any]) -> dict[str, Any]:
     report_data = _safe_get(payload, "report", "data") or {}
     if not isinstance(report_data, dict):
@@ -529,15 +610,8 @@ def build_file_report_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "id": report_id,
             "meaningful_name": attributes.get("meaningful_name"),
             "type_description": attributes.get("type_description"),
-            "verdict": "malicious" if stats.get("malicious", 0) else ("suspicious" if stats.get("suspicious", 0) else "not_flagged"),
-            "analysis": {
-                "malicious": stats.get("malicious", 0),
-                "suspicious": stats.get("suspicious", 0),
-                "undetected": stats.get("undetected", 0),
-                "harmless": stats.get("harmless", 0),
-                "failure": stats.get("failure", 0),
-                "type_unsupported": stats.get("type-unsupported", 0),
-            },
+            "verdict": build_verdict(stats),
+            "analysis": build_analysis_summary(stats),
             "reputation": attributes.get("reputation"),
             "threat_severity_level": severity.get("threat_severity_level"),
             "threat_severity_summary": severity.get("level_description"),
@@ -570,10 +644,167 @@ def build_file_report_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "last_modification_date": epoch_to_iso(attributes.get("last_modification_date")),
             "unique_sources": attributes.get("unique_sources"),
         },
-        "top_detections": summarize_detection_results(attributes, limit=10),
-        "relations": summarize_relationships(payload.get("relationships", {}) if isinstance(payload.get("relationships"), dict) else {}, limit=5),
     }
     return summary
+
+
+def build_url_report_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    report_data = _safe_get(payload, "report", "data") or {}
+    if not isinstance(report_data, dict):
+        raise VirusTotalClientError("Unexpected URL report shape for summary output")
+    attributes = report_data.get("attributes", {})
+    if not isinstance(attributes, dict):
+        raise VirusTotalClientError("Unexpected URL report attributes for summary output")
+
+    report_id = report_data.get("id")
+    stats = attributes.get("last_analysis_stats", {}) if isinstance(attributes.get("last_analysis_stats"), dict) else {}
+    categories = attributes.get("categories", {})
+    categories_list = list(categories.values()) if isinstance(categories, dict) else []
+
+    return compact_dict(
+        {
+            "tool": payload.get("tool"),
+            "retrieved_at": payload.get("retrieved_at"),
+            "input": payload.get("input"),
+            "url_link": build_url_gui_link(report_id),
+            "summary": compact_dict(
+                {
+                    "id": report_id,
+                    "url": attributes.get("url"),
+                    "title": attributes.get("title"),
+                    "verdict": build_verdict(stats),
+                    "analysis": build_analysis_summary(stats),
+                    "reputation": attributes.get("reputation"),
+                    "categories": categories_list,
+                    "tags": list(attributes.get("tags", []))[:10],
+                }
+            ),
+            "details_summary": compact_dict(
+                {
+                    "url": attributes.get("url"),
+                    "last_final_url": attributes.get("last_final_url"),
+                    "title": attributes.get("title"),
+                    "times_submitted": attributes.get("times_submitted"),
+                    "total_votes": attributes.get("total_votes"),
+                }
+            ),
+            "telemetry_summary": compact_dict(
+                {
+                    "first_submission_date": epoch_to_iso(attributes.get("first_submission_date")),
+                    "last_submission_date": epoch_to_iso(attributes.get("last_submission_date")),
+                    "last_analysis_date": epoch_to_iso(attributes.get("last_analysis_date")),
+                    "last_modification_date": epoch_to_iso(attributes.get("last_modification_date")),
+                }
+            ),
+        }
+    )
+
+
+def build_ip_report_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    report_data = _safe_get(payload, "report", "data") or {}
+    if not isinstance(report_data, dict):
+        raise VirusTotalClientError("Unexpected IP report shape for summary output")
+    attributes = report_data.get("attributes", {})
+    if not isinstance(attributes, dict):
+        raise VirusTotalClientError("Unexpected IP report attributes for summary output")
+
+    report_id = report_data.get("id")
+    stats = attributes.get("last_analysis_stats", {}) if isinstance(attributes.get("last_analysis_stats"), dict) else {}
+
+    return compact_dict(
+        {
+            "tool": payload.get("tool"),
+            "retrieved_at": payload.get("retrieved_at"),
+            "input": payload.get("input"),
+            "ip_link": build_ip_gui_link(report_id),
+            "summary": compact_dict(
+                {
+                    "id": report_id,
+                    "verdict": build_verdict(stats),
+                    "analysis": build_analysis_summary(stats),
+                    "reputation": attributes.get("reputation"),
+                    "country": attributes.get("country"),
+                    "continent": attributes.get("continent"),
+                    "network": attributes.get("network"),
+                    "as_owner": attributes.get("as_owner"),
+                    "asn": attributes.get("asn"),
+                    "tags": list(attributes.get("tags", []))[:10],
+                }
+            ),
+            "details_summary": compact_dict(
+                {
+                    "regional_internet_registry": attributes.get("regional_internet_registry"),
+                    "jarm": attributes.get("jarm"),
+                    "certificate_summary": summarize_certificate(
+                        attributes.get("last_https_certificate")
+                    ),
+                    "last_https_certificate_date": epoch_to_iso(attributes.get("last_https_certificate_date")),
+                    "last_modification_date": epoch_to_iso(attributes.get("last_modification_date")),
+                    "total_votes": attributes.get("total_votes"),
+                }
+            ),
+            "telemetry_summary": compact_dict(
+                {
+                    "last_analysis_date": epoch_to_iso(attributes.get("last_analysis_date")),
+                    "last_modification_date": epoch_to_iso(attributes.get("last_modification_date")),
+                    "whois_date": epoch_to_iso(attributes.get("whois_date")),
+                }
+            ),
+        }
+    )
+
+
+def build_domain_report_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    report_data = _safe_get(payload, "report", "data") or {}
+    if not isinstance(report_data, dict):
+        raise VirusTotalClientError("Unexpected domain report shape for summary output")
+    attributes = report_data.get("attributes", {})
+    if not isinstance(attributes, dict):
+        raise VirusTotalClientError("Unexpected domain report attributes for summary output")
+
+    report_id = report_data.get("id")
+    stats = attributes.get("last_analysis_stats", {}) if isinstance(attributes.get("last_analysis_stats"), dict) else {}
+
+    return compact_dict(
+        {
+            "tool": payload.get("tool"),
+            "retrieved_at": payload.get("retrieved_at"),
+            "input": payload.get("input"),
+            "domain_link": build_domain_gui_link(report_id),
+            "summary": compact_dict(
+                {
+                    "id": report_id,
+                    "verdict": build_verdict(stats),
+                    "analysis": build_analysis_summary(stats),
+                    "reputation": attributes.get("reputation"),
+                    "categories": list(attributes.get("categories", {}).values()) if isinstance(attributes.get("categories"), dict) else [],
+                    "creation_date": epoch_to_iso(attributes.get("creation_date")),
+                    "last_update_date": epoch_to_iso(attributes.get("last_update_date")),
+                    "tags": list(attributes.get("tags", []))[:10],
+                }
+            ),
+            "details_summary": compact_dict(
+                {
+                    "registrar": attributes.get("registrar"),
+                    "tld": attributes.get("tld"),
+                    "certificate_summary": summarize_certificate(
+                        attributes.get("last_https_certificate")
+                    ),
+                    "last_https_certificate_date": epoch_to_iso(attributes.get("last_https_certificate_date")),
+                    "total_votes": attributes.get("total_votes"),
+                }
+            ),
+            "telemetry_summary": compact_dict(
+                {
+                    "creation_date": epoch_to_iso(attributes.get("creation_date")),
+                    "last_update_date": epoch_to_iso(attributes.get("last_update_date")),
+                    "last_analysis_date": epoch_to_iso(attributes.get("last_analysis_date")),
+                    "last_modification_date": epoch_to_iso(attributes.get("last_modification_date")),
+                    "whois_date": epoch_to_iso(attributes.get("whois_date")),
+                }
+            ),
+        }
+    )
 
 
 def poll_analysis(client: VirusTotalClient, analysis_id: str, timeout: int, interval: int) -> Any:
@@ -591,19 +822,18 @@ def poll_analysis(client: VirusTotalClient, analysis_id: str, timeout: int, inte
 def handle_list_tools(args: argparse.Namespace) -> Any:
     return {
         "tools": [
-            {"name": "get_url_report", "type": "report", "default_relationships": list(DEFAULT_URL_REPORT_RELATIONSHIPS)},
+            {"name": "get_url_report", "type": "report", "raw_switch": "-raw / --raw", "relationship_command": "get_url_relationship"},
             {"name": "get_url_relationship", "type": "relationship", "relationships": list(URL_RELATIONSHIPS)},
-            {"name": "get_file_report", "type": "report", "default_relationships": list(DEFAULT_FILE_REPORT_RELATIONSHIPS)},
+            {"name": "get_file_report", "type": "report", "raw_switch": "-raw / --raw", "relationship_command": "get_file_relationship"},
             {"name": "get_file_relationship", "type": "relationship", "relationships": list(FILE_RELATIONSHIPS)},
-            {"name": "get_ip_report", "type": "report", "default_relationships": list(DEFAULT_IP_REPORT_RELATIONSHIPS)},
+            {"name": "get_ip_report", "type": "report", "raw_switch": "-raw / --raw", "relationship_command": "get_ip_relationship"},
             {"name": "get_ip_relationship", "type": "relationship", "relationships": list(IP_RELATIONSHIPS)},
-            {"name": "get_domain_report", "type": "report", "default_relationships": list(DEFAULT_DOMAIN_REPORT_RELATIONSHIPS)},
+            {"name": "get_domain_report", "type": "report", "raw_switch": "-raw / --raw", "relationship_command": "get_domain_relationship"},
             {"name": "get_domain_relationship", "type": "relationship", "relationships": list(DOMAIN_RELATIONSHIPS)},
         ],
         "config_precedence": [
             "VIRUSTOTAL_API_KEY environment variable",
             str(DEFAULT_REPO_CONFIG),
-            str(DEFAULT_USER_CONFIG),
         ],
     }
 
@@ -617,39 +847,35 @@ def handle_get_url_report(args: argparse.Namespace) -> Any:
         raise VirusTotalClientError("VirusTotal did not return an analysis id for the URL submission")
     analysis = poll_analysis(client, analysis_id, args.poll_timeout, args.poll_interval)
     basic_report = client.request_json("GET", f"/urls/{encoded_url}")
-    relationships = fetch_relationships(
-        client,
-        "urls",
-        encoded_url,
-        DEFAULT_URL_REPORT_RELATIONSHIPS,
-        limit=args.relationship_limit,
-    )
-    return {
+    payload = {
         "tool": "get_url_report",
         "retrieved_at": now_utc(),
         "input": {"url": args.url},
         "analysis_id": analysis_id,
         "analysis": analysis,
         "report": basic_report,
-        "relationships": relationships,
     }
+    if args.raw:
+        return payload
+    return build_url_report_summary(payload)
 
 
 def handle_get_url_relationship(args: argparse.Namespace) -> Any:
     client = build_client(args)
     encoded_url = encode_url_for_vt(args.url)
+    relationship = resolve_relationship_arg(args)
     result = relationship_response(
         client,
         "urls",
         encoded_url,
-        args.relationship,
+        relationship,
         limit=args.limit,
         cursor=args.cursor,
     )
     return {
         "tool": "get_url_relationship",
         "retrieved_at": now_utc(),
-        "input": {"url": args.url, "relationship": args.relationship, "limit": args.limit, "cursor": args.cursor},
+        "input": {"url": args.url, "relationship": relationship, "limit": args.limit, "cursor": args.cursor},
         "relationship_result": result,
     }
 
@@ -657,19 +883,11 @@ def handle_get_url_relationship(args: argparse.Namespace) -> Any:
 def handle_get_file_report(args: argparse.Namespace) -> Any:
     client = build_client(args)
     basic_report = client.request_json("GET", f"/files/{args.hash}")
-    relationships = fetch_relationships(
-        client,
-        "files",
-        args.hash,
-        DEFAULT_FILE_REPORT_RELATIONSHIPS,
-        limit=args.relationship_limit,
-    )
     payload = {
         "tool": "get_file_report",
         "retrieved_at": now_utc(),
         "input": {"hash": args.hash},
         "report": basic_report,
-        "relationships": relationships,
     }
     if args.raw:
         return payload
@@ -678,18 +896,19 @@ def handle_get_file_report(args: argparse.Namespace) -> Any:
 
 def handle_get_file_relationship(args: argparse.Namespace) -> Any:
     client = build_client(args)
+    relationship = resolve_relationship_arg(args)
     result = relationship_response(
         client,
         "files",
         args.hash,
-        args.relationship,
+        relationship,
         limit=args.limit,
         cursor=args.cursor,
     )
     return {
         "tool": "get_file_relationship",
         "retrieved_at": now_utc(),
-        "input": {"hash": args.hash, "relationship": args.relationship, "limit": args.limit, "cursor": args.cursor},
+        "input": {"hash": args.hash, "relationship": relationship, "limit": args.limit, "cursor": args.cursor},
         "relationship_result": result,
     }
 
@@ -697,74 +916,65 @@ def handle_get_file_relationship(args: argparse.Namespace) -> Any:
 def handle_get_ip_report(args: argparse.Namespace) -> Any:
     client = build_client(args)
     basic_report = client.request_json("GET", f"/ip_addresses/{args.ip}")
-    relationships = fetch_relationships(
-        client,
-        "ip_addresses",
-        args.ip,
-        DEFAULT_IP_REPORT_RELATIONSHIPS,
-        limit=args.relationship_limit,
-    )
-    return {
+    payload = {
         "tool": "get_ip_report",
         "retrieved_at": now_utc(),
         "input": {"ip": args.ip},
         "report": basic_report,
-        "relationships": relationships,
     }
+    if args.raw:
+        return payload
+    return build_ip_report_summary(payload)
 
 
 def handle_get_ip_relationship(args: argparse.Namespace) -> Any:
     client = build_client(args)
+    relationship = resolve_relationship_arg(args)
     result = relationship_response(
         client,
         "ip_addresses",
         args.ip,
-        args.relationship,
+        relationship,
         limit=args.limit,
         cursor=args.cursor,
     )
     return {
         "tool": "get_ip_relationship",
         "retrieved_at": now_utc(),
-        "input": {"ip": args.ip, "relationship": args.relationship, "limit": args.limit, "cursor": args.cursor},
+        "input": {"ip": args.ip, "relationship": relationship, "limit": args.limit, "cursor": args.cursor},
         "relationship_result": result,
     }
 
 
 def handle_get_domain_report(args: argparse.Namespace) -> Any:
     client = build_client(args)
-    selected_relationships = tuple(args.relationships) if args.relationships else DEFAULT_DOMAIN_REPORT_RELATIONSHIPS
     basic_report = client.request_json("GET", f"/domains/{args.domain}")
-    relationships = fetch_relationships(
-        client,
-        "domains",
-        args.domain,
-        selected_relationships,
-        limit=args.relationship_limit,
-    )
-    return {
+    payload = {
         "tool": "get_domain_report",
         "retrieved_at": now_utc(),
-        "input": {"domain": args.domain, "relationships": list(selected_relationships)},
+        "input": {"domain": args.domain},
         "report": basic_report,
-        "relationships": relationships,
     }
+    if args.raw:
+        return payload
+    return build_domain_report_summary(payload)
 
 
 def handle_get_domain_relationship(args: argparse.Namespace) -> Any:
     client = build_client(args)
+    relationship = resolve_relationship_arg(args)
     result = relationship_response(
         client,
         "domains",
         args.domain,
-        args.relationship,
+        relationship,
         limit=args.limit,
         cursor=args.cursor,
     )
     return {
         "tool": "get_domain_relationship",
         "retrieved_at": now_utc(),
-        "input": {"domain": args.domain, "relationship": args.relationship, "limit": args.limit, "cursor": args.cursor},
+        "input": {"domain": args.domain, "relationship": relationship, "limit": args.limit, "cursor": args.cursor},
         "relationship_result": result,
     }
 
@@ -781,6 +991,19 @@ def add_relationship_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cursor", help="Pagination cursor from a previous result")
 
 
+def add_relationship_selector(parser: argparse.ArgumentParser, choices: Iterable[str]) -> None:
+    allowed = tuple(choices)
+    parser.add_argument("relationship", nargs="?", choices=allowed, help="Relationship type to query")
+    parser.add_argument("--relationship", dest="relationship_flag", choices=allowed, help=argparse.SUPPRESS)
+
+
+def resolve_relationship_arg(args: argparse.Namespace) -> str:
+    relationship = getattr(args, "relationship", None) or getattr(args, "relationship_flag", None)
+    if not relationship:
+        raise VirusTotalClientError("relationship is required")
+    return relationship
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Repo-local VirusTotal CLI mirroring the mcp-virustotal tool surface.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -788,26 +1011,31 @@ def build_parser() -> argparse.ArgumentParser:
     list_tools = subparsers.add_parser("list_tools", help="List the available VirusTotal tool names and relationship sets")
     list_tools.set_defaults(handler=handle_list_tools)
 
-    url_report = subparsers.add_parser("get_url_report", help="Get a URL report with default relationships")
+    url_report = subparsers.add_parser("get_url_report", help="Get a compact URL report")
     add_common_command_args(url_report)
     url_report.add_argument("--url", required=True, type=validate_url, help="The URL to analyze")
     url_report.add_argument("--poll-timeout", type=int, default=60, help="How long to wait for URL analysis completion")
     url_report.add_argument("--poll-interval", type=int, default=3, help="Polling interval in seconds for URL analysis")
-    url_report.add_argument("--relationship-limit", type=int, default=DEFAULT_RELATIONSHIP_LIMIT, help="Per-relationship fetch limit")
+    url_report.add_argument(
+        "-raw",
+        "--raw",
+        action="store_true",
+        help="Return the full raw VirusTotal payload instead of the default compact URL summary",
+    )
     url_report.set_defaults(handler=handle_get_url_report)
 
     url_rel = subparsers.add_parser("get_url_relationship", help="Get a specific URL relationship")
     add_common_command_args(url_rel)
     url_rel.add_argument("--url", required=True, type=validate_url, help="The URL to analyze")
-    url_rel.add_argument("--relationship", required=True, choices=URL_RELATIONSHIPS, help="Relationship type to query")
+    add_relationship_selector(url_rel, URL_RELATIONSHIPS)
     add_relationship_args(url_rel)
     url_rel.set_defaults(handler=handle_get_url_relationship)
 
-    file_report = subparsers.add_parser("get_file_report", help="Get a file report with default relationships")
+    file_report = subparsers.add_parser("get_file_report", help="Get a compact file report")
     add_common_command_args(file_report)
     file_report.add_argument("--hash", required=True, type=validate_hash, help="MD5, SHA-1, or SHA-256 hash")
-    file_report.add_argument("--relationship-limit", type=int, default=DEFAULT_RELATIONSHIP_LIMIT, help="Per-relationship fetch limit")
     file_report.add_argument(
+        "-raw",
         "--raw",
         action="store_true",
         help="Return the full raw VirusTotal payload instead of the default compact file summary",
@@ -817,34 +1045,43 @@ def build_parser() -> argparse.ArgumentParser:
     file_rel = subparsers.add_parser("get_file_relationship", help="Get a specific file relationship")
     add_common_command_args(file_rel)
     file_rel.add_argument("--hash", required=True, type=validate_hash, help="MD5, SHA-1, or SHA-256 hash")
-    file_rel.add_argument("--relationship", required=True, choices=FILE_RELATIONSHIPS, help="Relationship type to query")
+    add_relationship_selector(file_rel, FILE_RELATIONSHIPS)
     add_relationship_args(file_rel)
     file_rel.set_defaults(handler=handle_get_file_relationship)
 
-    ip_report = subparsers.add_parser("get_ip_report", help="Get an IP report with default relationships")
+    ip_report = subparsers.add_parser("get_ip_report", help="Get a compact IP report")
     add_common_command_args(ip_report)
     ip_report.add_argument("--ip", required=True, type=validate_ip, help="IP address to analyze")
-    ip_report.add_argument("--relationship-limit", type=int, default=DEFAULT_RELATIONSHIP_LIMIT, help="Per-relationship fetch limit")
+    ip_report.add_argument(
+        "-raw",
+        "--raw",
+        action="store_true",
+        help="Return the full raw VirusTotal payload instead of the default compact IP summary",
+    )
     ip_report.set_defaults(handler=handle_get_ip_report)
 
     ip_rel = subparsers.add_parser("get_ip_relationship", help="Get a specific IP relationship")
     add_common_command_args(ip_rel)
     ip_rel.add_argument("--ip", required=True, type=validate_ip, help="IP address to analyze")
-    ip_rel.add_argument("--relationship", required=True, choices=IP_RELATIONSHIPS, help="Relationship type to query")
+    add_relationship_selector(ip_rel, IP_RELATIONSHIPS)
     add_relationship_args(ip_rel)
     ip_rel.set_defaults(handler=handle_get_ip_relationship)
 
-    domain_report = subparsers.add_parser("get_domain_report", help="Get a domain report with default or selected relationships")
+    domain_report = subparsers.add_parser("get_domain_report", help="Get a compact domain report")
     add_common_command_args(domain_report)
     domain_report.add_argument("--domain", required=True, type=validate_domain, help="Domain name to analyze")
-    domain_report.add_argument("--relationships", nargs="*", choices=DOMAIN_RELATIONSHIPS, help="Optional list of relationships to include")
-    domain_report.add_argument("--relationship-limit", type=int, default=DEFAULT_RELATIONSHIP_LIMIT, help="Per-relationship fetch limit")
+    domain_report.add_argument(
+        "-raw",
+        "--raw",
+        action="store_true",
+        help="Return the full raw VirusTotal payload instead of the default compact domain summary",
+    )
     domain_report.set_defaults(handler=handle_get_domain_report)
 
     domain_rel = subparsers.add_parser("get_domain_relationship", help="Get a specific domain relationship")
     add_common_command_args(domain_rel)
     domain_rel.add_argument("--domain", required=True, type=validate_domain, help="Domain name to analyze")
-    domain_rel.add_argument("--relationship", required=True, choices=DOMAIN_RELATIONSHIPS, help="Relationship type to query")
+    add_relationship_selector(domain_rel, DOMAIN_RELATIONSHIPS)
     add_relationship_args(domain_rel)
     domain_rel.set_defaults(handler=handle_get_domain_relationship)
 

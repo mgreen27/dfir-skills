@@ -25,6 +25,78 @@ against a Velociraptor client.
 12. After each meaningful collection wave, decide whether the new evidence answers an existing wiki question or creates a new one, then update the wiki accordingly.
 13. In a first-pass DFIR review, explicitly record all potentially malicious disk-side artifacts in `wiki/suspicious-artifacts.md`, even when they are still only leads.
 14. When a suspicious binary path is identified, run `Windows.Detection.BinaryHunter` against the exact path and record the resulting hashes, signer details, PE version data, imports, PDB path, and timestamp metadata in the investigation wiki.
+15. Prefer reviewing completed exports under the investigation `velociraptor/exports/` tree before running new collection. Only recollect when the user explicitly asks for it or when the exports do not answer the current evidence question.
+16. For cross-host scoping of a new IOC, search the existing exported rows first with `./skills/windows-analysis/scripts/search_exports.py` before queueing fresh collection.
+
+## Collection Model
+
+Do not use `windows-analysis` as a bulk collection orchestrator anymore.
+
+For machine-wide Velociraptor collection, use the dedicated
+`windows-collection` skill for dead-disk or offline mapped-client work:
+
+```bash
+./venv/bin/python ./skills/windows-collection/scripts/run_windows_collection.py \
+  ensure \
+  --investigation-id shieldbase-intrusion \
+  --host base-file \
+  --collection-type all
+```
+
+For live remote Velociraptor collection, use `windows-collection-live` with an
+explicit remote API client config:
+
+```bash
+./venv/bin/python ./skills/windows-collection-live/scripts/run_windows_collection_live.py \
+  --api-client /path/to/remote-api_client.yaml \
+  ensure \
+  --investigation-id shieldbase-intrusion \
+  --host live-host-01 \
+  --collection-type execution
+```
+
+The compatibility wrapper at
+`./skills/windows-analysis/scripts/run_windows_host_collection.py` now only
+forwards old `queue` and `status` calls into `windows-collection`. Its old
+bulk `fetch` path is retired.
+
+For bounded post-analysis timeline pivots, use the dedicated
+`windows-timeline` skill or the `windows-collection` `timeline` collection
+type so `Windows.NTFS.MFT` and `Windows.EventLogs.EvtxHunter` share the same
+time window and export handling.
+
+Use this skill for targeted artifact review, listing, inspection, and one-off
+analysis pivots. Use export-specific helpers to retrieve analyst-ready CSVs
+from completed collection flows. Prefer those completed exports first and only
+queue new collection when there is a concrete evidence gap.
+
+## Export-First IOC Search
+
+Use the export search helper when you need to scope a filename, path, domain,
+hash fragment, command line, or other string across hosts without recollecting
+anything:
+
+```bash
+./venv/bin/python ./skills/windows-analysis/scripts/search_exports.py \
+  --investigation-id shieldbase-intrusion \
+  --pattern squirreldirectory.com
+```
+
+For Windows paths, prefer `--exact-path` so slash and case normalization do
+not hide matches:
+
+```bash
+./venv/bin/python ./skills/windows-analysis/scripts/search_exports.py \
+  --investigation-id shieldbase-intrusion \
+  --exact-path 'C:\Windows\Temp\perfmon\PWDumpX.exe'
+```
+
+Useful options:
+
+- `--host <hostname>` to scope the search to one or more systems
+- `--path-substring <text>` to narrow by export filename or folder
+- `--format csv` to write analyst-friendly rows
+- `--output <path>` to save the result instead of printing it
 
 ## Investigation Overview
 
@@ -55,6 +127,10 @@ Start with these artifact families during Windows triage:
 These artifacts are the main evidence-of-execution workflow. Review the
 artifact description with `artifacts show <name>` before interpreting results.
 This is mandatory because several of these artifacts have important caveats.
+Also review the companion interpretation guide in
+`./skills/windows-analysis/references/guides/ir-guidebook-artifact-analysis-notes.md`
+when you are making strong claims from execution, presence, user-activity, or
+registry-backed artifacts.
 
 - `Windows.Detection.Amcache`
   Use for SHA1-backed Amcache execution and installation metadata. Treat
@@ -67,10 +143,17 @@ This is mandatory because several of these artifacts have important caveats.
   Use for `ActivitiesCache.db` review of recently used applications and files.
   Treat this as user activity context, not a standalone execution verdict, and
   note the artifact is marked deprecated in favor of `Generic.Forensic.SQLiteHunter`.
+- `Windows.Forensics.SRUM`
+  Use for SRUM-backed application and network usage context when the SRUDB is
+  present. Treat it as execution-adjacent activity evidence rather than a
+  standalone execution verdict, and review the separate SRUM scopes instead of
+  assuming one table tells the full story.
 - `Windows.Registry.UserAssist`
   Use for Explorer-launched program activity. Do not treat it as complete
   execution coverage because command-line launches do not appear here, and some
-  viewing/access patterns can update counts or times.
+  viewing/access patterns can update counts or times. In curated exports,
+  suppress `UEME_*` bookkeeping rows and implausible early timestamps because
+  they are not strong execution evidence.
 - `Windows.Registry.AppCompatCache`
   Use for shimcache-style path and compatibility evidence. On Windows 10+ an
   execution flag of `1` indicates execution, but execution semantics are weaker
@@ -82,12 +165,21 @@ This is mandatory because several of these artifacts have important caveats.
 - `Windows.Forensics.Prefetch`
   Use for strong binary execution leads, including multiple run timestamps on
   newer Windows versions, where Prefetch is present and enabled.
+- `Windows.Registry.Hunter`
+  Use for a broader registry-backed execution view when you want one artifact
+  to cover AppCompatCache, UserAssist, BAM, RADAR, and other execution-related
+  categories together. In this repo's dead-disk workflow, collect it with
+  `RemappingStrategy='None'` and interpret the category-specific exports rather
+  than treating the raw result set as one homogeneous signal.
 
 For deeper-dive follow-up work:
 
 - use `Windows.NTFS.MFT` to pivot into raw NTFS evidence when you need file
   presence, path, timestamp, or filename confirmation beyond higher-level
   artifact summaries
+- use the bounded timeline pivot when iterative analysis has already narrowed a
+  suspicious time window and you want adjacent MFT plus EVTX coverage before
+  running broader follow-up collection
 - use `Windows.Search.FileFinder` to target known paths, filenames, extensions,
   or IOC patterns once you have a lead from EVTX, Amcache, Prefetch, or MFT
 - use `Windows.Registry.Hunter` when you need a broad registry-centric
@@ -155,10 +247,12 @@ for artifact in \
   Windows.Detection.Amcache \
   Windows.Forensics.Bam \
   Windows.Forensics.Timeline \
+  Windows.Forensics.SRUM \
   Windows.Registry.UserAssist \
   Windows.Registry.AppCompatCache \
   Windows.System.AppCompatPCA \
-  Windows.Forensics.Prefetch
+  Windows.Forensics.Prefetch \
+  Windows.Registry.Hunter
 do
   ./velociraptor --config ./server.config.yaml \
     artifacts show "$artifact"
@@ -383,8 +477,7 @@ Troubleshooting:
   dead-disk client, the problem is usually the artifact's
   `RemappingStrategy`, not the host `remapping.yaml`.
 - For dead-disk images in this repo, rerun it with
-  `RemappingStrategy='None'`, or use the dedicated
-  `windows-registry-analysis` skill directly.
+  `RemappingStrategy='None'`.
 
 Example persistence-review collections for a dead-disk image:
 

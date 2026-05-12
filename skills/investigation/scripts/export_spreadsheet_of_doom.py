@@ -11,13 +11,14 @@ from openpyxl.utils import get_column_letter
 
 
 HEADER_FILL = PatternFill(fill_type="solid", fgColor="1F4E78")
-HEADER_FONT = Font(color="FFFFFF", bold=True, size=14)
-BODY_FONT = Font(size=14)
+HEADER_FONT = Font(color="FFFFFF", bold=True, size=18)
+BODY_FONT = Font(size=18)
 ALT_FILL = PatternFill(fill_type="solid", fgColor="EAF2F8")
 WRAP_ALIGNMENT = Alignment(vertical="top", wrap_text=True)
 SHEET_ORDER = [
     ("timeline.csv", "Timeline"),
     ("systems.csv", "Systems"),
+    ("asset-map.csv", "Asset Map"),
     ("users.csv", "Users"),
     ("host-indicators.csv", "Host Indicators"),
     ("network-indicators.csv", "Network Indicators"),

@@ -35,6 +35,9 @@ that help prepare tooling, classify evidence, and support downstream analysis.
 15. The default analysis objective is a full DFIR review of the provided
     evidence, with explicit highlighting of all potentially malicious
     artifacts before deeper workflow-based review begins.
+16. Prefer reviewing existing exported artifact rows before running new
+    collections. Recollect only when the user explicitly asks for it or when
+    the current exports cannot answer a specific evidence question.
 
 ## DFIR Analysis Prompt
 
@@ -68,7 +71,8 @@ investigation forward.
 Start from the current investigation wiki and the latest raw outputs under
 `./investigations/<investigation_id>/`. Read the wiki first to understand the
 current analysis, Spreadsheet of Doom status, evidence notes, and open
-questions. Then decide
+questions. Review existing exported rows before planning any new collection.
+Then decide
 whether the next best step is:
 
 1. write or refine analysis in the wiki based on evidence already collected
@@ -84,10 +88,16 @@ When writing to the wiki:
 - update `wiki/hot.md` with the current case position and active threads
 
 When collecting more evidence:
+- prefer existing exported artifact rows over recollection whenever those
+  exports can answer the current question
 - prefer Velociraptor for disk, registry, NTFS, event log, scheduled task, and
   file-presence questions
 - prefer Volatility 3 for process, parent-child, command-line, network, and
   memory-resident execution questions
+- when iterative analysis narrows a suspicious time window, run a bounded
+  post-analysis timeline pivot with `Windows.NTFS.MFT` and
+  `Windows.EventLogs.EvtxHunter` using shared `DateAfter` and `DateBefore`
+  bounds before broadening collection again
 - when a suspicious binary path is identified on disk, run
   `Windows.Detection.BinaryHunter` against the exact path and capture hashes,
   signer details, PE metadata, PDB path, and import-hash information
@@ -133,6 +143,12 @@ Start broad, then narrow:
 
 When running this workflow:
 - prefer broad triage first, then targeted pivots
+- prefer reviewing completed exports before queueing more collection, unless
+  the user explicitly asks for recollection or the current exports do not
+  answer the open question
+- when timeline anomalies or suspicious windows emerge, use bounded
+  `Windows.NTFS.MFT` plus `Windows.EventLogs.EvtxHunter` pivots to look for
+  adjacent activity before expanding into broader recollection
 - treat suspicious binaries as a standard targeted pivot: use
   `Windows.Detection.BinaryHunter` to turn a path-based lead into a file
   identity record with hashes, signer details, and PE metadata
@@ -256,14 +272,10 @@ is a structured case file that shows:
   durable long-running analysis, run the mapped-client supervisor under a
   host-native service manager such as `launchd` on macOS or `systemd` on
   Linux.
-- The repo now has a dedicated `windows-registry-analysis` skill for
-  `Windows.Registry.Hunter`. In this workflow, `RemappingStrategy='None'` is
-  the hard requirement and the main review output comes from the `Results`
-  scope (`Windows.Registry.Hunter/Results`).
 - Registry Hunter output is large enough that the default collection pattern
   should be split into a system-information wave and an
   investigation-specific wave, with results saved under
-  `./investigations/<investigation_id>/evidence/systems/<system>/velociraptor/registry-hunter/`.
+  `./investigations/<investigation_id>/evidence/systems/<system>/velociraptor/exports/registry-hunter/`.
 - Velociraptor prep now strips the default sample tenant block from
   `server.config.yaml` and removes `orgs/O123*`, so rebuilt workspaces stay
   root-only unless the user explicitly adds tenants later.
@@ -490,16 +502,6 @@ is a structured case file that shows:
   `investigation-query` skill names, and keep command examples
   investigation-centric by using reusable variables like
   `INVESTIGATION_ID`, `SYSTEM_NAME`, and `CLIENT_ID`.
-- The repo now includes a `windows-execution-analysis` skill for the core
-  Velociraptor evidence-of-execution set:
-  `Windows.Detection.Amcache`, `Windows.Forensics.Bam`,
-  `Windows.Forensics.Timeline`, `Windows.Registry.UserAssist`,
-  `Windows.Registry.AppCompatCache`, `Windows.System.AppCompatPCA`, and
-  `Windows.Forensics.Prefetch`.
-- Execution-analysis outputs should land under
-  `./investigations/<investigation_id>/evidence/systems/<system>/velociraptor/execution-analysis/`
-  with a per-host `execution-analysis-manifest.tsv` so later review can see
-  flow reuse, row counts, and output paths without reopening every JSONL file.
 - On the current `shieldbase-intrusion` case, the execution-analysis sweep
   reused finished flows where available and only queued missing artifacts for
   `base-file`; `base-dc` produced useful Amcache, UserAssist, and
@@ -511,3 +513,414 @@ is a structured case file that shows:
   with `wormhole-windows` PDB paths, while downgrading
   `officedeploymenttool_9326.3600.exe` and `Mnemosyne.sys` to likely benign
   context.
+- The Spreadsheet of Doom XLSX exporter now sets both header and body cells to
+  14pt font by default. Rebuild the workbook through the investigation sync
+  after changing spreadsheet content so the export stays consistent.
+- Skill command examples should be repo-relative from the workspace root, such
+  as `./venv/bin/python ./skills/...` and `cd ./velociraptor`, rather than
+  embedding machine-specific absolute paths.
+- The VirusTotal helper now defaults `get_file_report` to a compact
+  analyst-friendly summary with a GUI `file_link`, `summary`,
+  `details_summary`, and `telemetry_summary`, and the same compact-summary
+  pattern now applies to URL, IP, and domain reports. Keep Slack formatting
+  guidance in the skill documentation instead of emitting a stored
+  `slack_summary` field. Report commands should not fetch relationships at
+  all; use the dedicated `get_*_relationship` commands for threat actors or
+  other pivots. Support `-raw` as a short alias for `--raw` on all report
+  commands.
+- Compact VT IP and domain summaries should include a trimmed
+  `certificate_summary` when `last_https_certificate` is present, rather than
+  storing the full certificate object or bulky WHOIS text.
+- The preferred VirusTotal config shape is now a nested `virustotal` object in
+  `./config.json`, though the helper still accepts the older flat key layout
+  for backward compatibility.
+- The VirusTotal skill documentation is now output-first. Keep report examples
+  centered on compact JSON output and end the skill with Slack-posting
+  guidance that tells the analyst to summarize the VT result with emoji
+  headings instead of pasting full JSON into chat tools.
+- On the current mapped dead-disk persistence sweep, `Windows.System.Services`,
+  `Windows.Persistence.PermanentWMIEvents`, and
+  `Windows.Sysinternals.Autoruns` all exported empty headerless CSVs across the
+  case hosts. The useful persistence signal came instead from
+  `Windows.Registry.Hunter.services`, `Windows.Registry.Hunter.persistence`,
+  `Windows.Registry.Hunter.autoruns`, and `Windows.System.TaskScheduler`.
+- Persistence-looking tasks can still be benign admin context. In this case,
+  `Update_Sysmon_Rules` looked suspicious until export-first review tied it to
+  a public `ion-storm/sysmon-config` `Auto_Update.bat` download on
+  `base-wkstn-05`. Do not overcall these without adjacent evidence.
+
+### 2026-04-30
+
+- In this Codex environment, the reliable way to keep the local Velociraptor
+  stack live was to run the GUI plus each mapped client supervisor in separate
+  live terminal sessions; API `clients()` checks then showed fresh `LastSeen`
+  updates for both `base-dc` and `base-file`.
+- Status files under `velociraptor/mapped-clients/*/client-status.env` can
+  look fresh even after the GUI has died; trust live listener checks plus a
+  fresh `clients()` `LastSeen` query before assuming the stack is healthy.
+
+### 2026-05-01
+
+- For a straight Velociraptor GUI bring-up check, confirming listeners on
+  `127.0.0.1:{8000,8001,8889}` plus a trivial API query against `scope()`
+  was enough to verify the local workspace came up cleanly.
+- The repo now has a `velociraptor-server-watchdog` skill. Its health model is
+  listener checks plus a trivial API query, and the supervisor now refreshes
+  both `server-status.env` and `server-session.env` after restarts so runtime
+  metadata stays current.
+- To restore the common dead-disk pair quickly, start the server watchdog
+  first, then start the `base-dc` and `base-file` mapped-client supervisors
+  and confirm both hostnames show fresh `LastSeen` values through `clients()`.
+
+### 2026-05-03
+
+- Rebuilding Velociraptor through `prep_dfir_tools.sh -t velociraptor` picked
+  up the current GitHub release family (`v0.76`, local binary `0.76.5`).
+- `add_mapped_client.sh` must resolve the evidence path to an absolute path
+  before it `cd`s into `./velociraptor`; otherwise `deaddisk` can emit the
+  placeholder remap `remappings: true` for valid relative `./data/*.E01`
+  inputs.
+- On a fresh Velociraptor workspace, the API can take longer than 20 seconds
+  to become ready for `Server.Import.Extras`, `Server.Import.ArtifactExchange`,
+  and `Server.Import.DetectRaptor`; the prep flow now waits longer before
+  skipping those imports.
+
+### 2026-05-04
+
+- When the local Velociraptor stack is down, the reliable restore flow here is
+  still: start `supervise_server.sh` in a live session, confirm listeners on
+  `127.0.0.1:{8000,8001,8889}` plus `SELECT 1 AS ok FROM scope()`, then start
+  `supervise_mapped_client.sh` for `base-dc` and `base-file` in separate live
+  sessions and verify advancing `clients()` `LastSeen` values.
+
+### 2026-05-12
+
+- The repo now includes a `fetch-live-api-client` skill for remote live
+  environments: it SSHes to the Velociraptor server, runs `config api_client`
+  as the service user, and copies the resulting `api_client.yaml` into
+  `~/.config/<server>/` for later live-analysis workflows.
+- For live Linux triage through a remote API config, `Generic.Client.VQL`
+  plus `Linux.Search.FileFinder` worked well for small, targeted challenge
+  tasks. On the current `setup` host, `.viminfo` was more informative than
+  `.bash_history` and revealed prior work on `level1.c`, `level2.c`, and a
+  `readdir` preload hook in `healthcheck`.
+- On the same `setup` host, Level 3 was hidden by a separate mount namespace,
+  not by `LD_PRELOAD`: PID `2938` (`sleep infinity`) lived in mount namespace
+  `mnt:[4026532330]` while PID 1 used `mnt:[4026531841]`, and
+  `nsenter -t 2938 -m` exposed `/opt/secret/flag.txt` with content
+  `Level 3 solved :)`.
+
+### 2026-05-06
+
+- `supervise_server.sh` should be launched with absolute workspace and
+  `api_client.yaml` paths in a live session here; repo-relative arguments can
+  break its `gui.log` and `gui.pid` writes after the script `cd`s into
+  `./velociraptor`.
+- The repo now has a separate `windows-collection` skill for queueing and
+  status-checking bulk Windows collection flows without downloading rows, so a
+  later analysis workflow can own storage-optimized VQL retrieval.
+- `windows-collection` now supports target-type `ensure` checks that can reuse
+  broader matching flows, and it treats a requested collection type as
+  expected complete when the covering flow has finished even if some artifacts
+  produced zero rows.
+- `windows-collection` should match prior client flows by expected artifact
+  specs so hunt-driven collections can be reused, while `--force-run` remains
+  available when a fresh collection is explicitly required.
+- The default bulk Windows collection set now omits
+  `Windows.Registry.UserAssist` and `Windows.Registry.AppCompatCache`; use
+  `Windows.Registry.Hunter` when those registry-backed views are needed.
+- `windows-collection` now uses `pyvelociraptor` as a thin gRPC client with
+  bundled VQL files under the skill, and it queues one flow per artifact so
+  later export work can save one CSV per relevant result component.
+- `windows-collection` polling is now a first-class step through a dedicated
+  `poll` subcommand rather than ad hoc repeated `status` calls.
+- `windows-collection` now treats polling as the default queue/ensure path;
+  use `--no-poll` only when you explicitly want to return before the saved
+  collection set reaches an expected-complete state.
+- `windows-collection` now supports sectioned `Windows.Registry.Hunter`
+  collection items, and the repo-default sections currently are `all`,
+  `system-info`, and `execution` with `RemappingStrategy='None'`.
+- For parameterized single-artifact client collections, `collect_client()`
+  must be called with `artifacts=parse_json_array(data=Artifacts)` plus
+  `spec=parse_json(data=Spec)`; passing only `artifacts=...` queues the
+  artifact with default parameters and leaves `request.specs` empty.
+- Collection-time registry section requests now collapse to one
+  `Windows.Registry.Hunter[all]` flow with `RemappingStrategy='None'`; later
+  analysis/export should filter categories out of that broad result set
+  instead of recollecting `system-info` or `execution` separately.
+- Notebook-style `Windows.Registry.Hunter` VQL that reads `source(source="Results")`
+  should be rewritten for automation as
+  `source(client_id=..., flow_id=..., artifact='Windows.Registry.Hunter/Results')`.
+- For `Windows.Registry.Hunter`, the effective collection timeout must be
+  passed as the top-level `collect_client(..., timeout=1800)` argument and
+  matched against `request.timeout`; setting `timeout` only inside
+  `request.specs` is not enough for reuse or for avoiding the default
+  600-second behavior.
+- Under each host's `velociraptor/` tree, keep collection metadata in
+  `host-collection/`, analyst-ready derived outputs in `exports/`, and
+  follow-up pivots such as BinaryHunter in `enrichments/`; older
+  `execution-analysis/`, `registry-hunter/`, and `binaryhunter/` top-level
+  folders were folded into that layout.
+- `windows-analysis` should no longer own a separate bulk host-collection
+  implementation; machine-wide collection belongs to `windows-collection`, and
+  the old helper now only serves as a compatibility wrapper.
+- The separate `windows-execution-analysis` and `windows-registry-analysis`
+  skills were retired; machine-wide collection belongs to
+  `windows-collection`, and any later result retrieval should be handled by
+  collection-aware export workflows rather than standalone collectors.
+
+### 2026-05-07
+
+- `windows-collection` now exposes only two named collection types:
+  `all` for the full baseline host set and `execution` for the execution-only
+  subset; older `full` and group-oriented entrypoints should not be used in
+  new workflows.
+- `windows-collection` now supports repeatable `--env KEY=VALUE` arguments for
+  a single explicit `--artifact`, so parameterized one-off collections can be
+  queued without adding another special-case helper.
+- The legacy `windows-analysis` collection wrapper now defaults to
+  `--collection-type all` and forwards `--env` values, but the canonical
+  interface remains `./skills/windows-collection/scripts/run_windows_collection.py`.
+- `windows-collection` now owns the generic CSV download path too: `export`
+  writes one `<ArtifactName>_full.csv` per finished non-registry artifact
+  under each host's `velociraptor/exports/`, while `Windows.Registry.Hunter`
+  is split into one CSV per `Category` from the `Results` component.
+- Curated `Windows.Registry.Hunter` exports now live in repo `.vql` files
+  under `skills/windows-collection/references/`; the first shipped profile is
+  `execution`, which writes dedicated AppCompatCache, UserAssist, RADAR, and
+  BAM CSVs from `Windows.Registry.Hunter/Results`.
+- `windows-collection export-registry-hunter` now also has a `system-info`
+  profile that writes a single `Windows.Registry.Hunter.SystemInfo.csv`
+  export from the `System Info` category.
+- `windows-collection export-registry-hunter` now also has a `web-browsers`
+  profile that writes `Windows.Registry.Hunter.WebBrowsers.csv` from the
+  `Web Browsers` category.
+- `windows-collection export-registry-hunter` now also has a
+  `volume-shadow-copies` profile that writes
+  `Windows.Registry.Hunter.VolumeShadowCopies.csv` from the
+  `Volume Shadow Copies` category.
+- `windows-collection export-registry-hunter` now also has a `user-activity`
+  profile that writes `Windows.Registry.Hunter.UserActivity.csv` from the
+  `User Activity` category.
+- `windows-collection export-registry-hunter` now also has a `user-accounts`
+  profile that writes `Windows.Registry.Hunter.UserAccounts.csv` from the
+  `User Accounts` category.
+- `windows-collection export-registry-hunter` now also has a
+  `threat-hunting` profile that writes
+  `Windows.Registry.Hunter.ThreatHunting.csv` from the `Threat Hunting`
+  category.
+- `windows-collection export-registry-hunter` now also has a
+  `third-party-applications` profile that writes
+  `Windows.Registry.Hunter.ThirdPartyApplications.csv` from the
+  `Third Party Applications` category.
+- `windows-collection export-registry-hunter` now also has a `services`
+  profile that writes `Windows.Registry.Hunter.Services.csv` from the
+  `Services` category.
+- `windows-collection export-registry-hunter` now also has a
+  `network-shares` profile that writes
+  `Windows.Registry.Hunter.NetworkShares.csv` from the `Network Shares`
+  category.
+- `windows-collection export-registry-hunter` now also has a `persistence`
+  profile that writes `Windows.Registry.Hunter.Persistence.csv` from the
+  `Persistence` category.
+- `windows-collection export-registry-hunter` now also has a
+  `program-execution` profile that writes
+  `Windows.Registry.Hunter.ProgramExecution.csv` from the
+  `Program Execution` category.
+- `windows-collection export-registry-hunter` now also has a
+  `microsoft-office` profile that writes
+  `Windows.Registry.Hunter.MicrosoftOffice.csv` from the
+  `Microsoft Office` category.
+- `windows-collection export-registry-hunter` now also has a
+  `microsoft-exchange` profile that writes
+  `Windows.Registry.Hunter.MicrosoftExchange.csv` from the
+  `Microsoft Exchange` category.
+- `windows-collection export-registry-hunter` now also has an
+  `installed-software` profile that writes
+  `Windows.Registry.Hunter.InstalledSoftware.csv` from the
+  `Installed Software` category.
+- `windows-collection export-registry-hunter` now also has an `event-logs`
+  profile that writes `Windows.Registry.Hunter.EventLogs.csv` from the
+  `Event Logs` category.
+- `windows-collection export-registry-hunter` now also has a `devices`
+  profile that writes `Windows.Registry.Hunter.Devices.csv` from the
+  `Devices` category.
+- `windows-collection export-registry-hunter` now also has a `cloud-storage`
+  profile that writes `Windows.Registry.Hunter.CloudStorage.csv` from the
+  `Cloud Storage` category.
+- `windows-collection export-registry-hunter` now also has an `autoruns`
+  profile that writes `Windows.Registry.Hunter.Autoruns.csv` from the
+  `Autoruns` category.
+- The `windows-collection` execution set now includes
+  `Windows.Registry.Hunter[all]`, so the default evidence-of-execution
+  collection can reuse one broad registry-backed source for curated execution
+  exports.
+- `windows-collection export` now treats `Windows.Forensics.SRUM` as a
+  multi-scope artifact and always writes separate CSVs for `Execution Stats`,
+  `Application Resource Usage`, `Network Connections`, and `Network Usage`
+  even when those scopes are empty.
+- The `windows-collection` execution set now also includes
+  `Windows.Forensics.SRUM`, so the default evidence-of-execution collection
+  carries SRUM alongside Amcache, BAM, Timeline, Prefetch, AppCompatPCA, and
+  `Windows.Registry.Hunter[all]`.
+- `windows-collection` now auto-exports CSVs after `queue`, `ensure`, and
+  `poll` once the requested set is complete; use `--no-export` only when you
+  explicitly want to defer or suppress export generation.
+
+### 2026-05-07
+
+- `windows-collection` host state writes needed atomic file replacement and a
+  tolerant first-document JSON reader because concurrent targeted collections
+  could corrupt `host-collection-state.json`.
+- The current case confirmed a design gap: one host-level state file and one
+  generic export filename per artifact are not enough for iterative pivots.
+  Targeted `FileFinder` and `BinaryHunter` runs can overwrite earlier saved
+  request context or CSVs unless they are copied to unique names.
+- The `windows-collection` execution set now includes
+  `Windows.Forensics.RecentFileCache`, and the current `base-dc` and
+  `base-file` images both returned clean `0`-row results for that artifact.
+- In the current `shieldbase-intrusion` review, `base-file` carried the
+  strongest malicious evidence: PowerShell download-and-execute activity,
+  `n.ps1` staging into `C:\Windows\Temp\perfmon`, suspicious `PerfSvc.exe`,
+  staged `install_wormhole` installers, and automatic Microsoft Advanced API
+  services.
+- In the same case, targeted `FileFinder` checks on `base-dc` did not confirm
+  `C:\Users\spsql\n.ps1` or `C:\Windows\Temp\perfmon\**\*`, so the DC should
+  currently be treated as a downstream or partially confirmed host rather than
+  the primary staging origin.
+
+### 2026-05-08
+
+- The default investigation posture is now review-first: prefer existing
+  exported artifact rows over new collection, and only recollect when the user
+  explicitly requests it or the current exports cannot answer a concrete
+  evidence question.
+- Keep `windows-collection` as the dead-disk or offline mapped-client
+  collection skill. Use the separate `windows-collection-live` skill for live
+  remote Velociraptor collection, while sharing the same underlying
+  collection/export engine.
+
+### 2026-05-11
+
+- The repo's documented investigation strategy is investigation-centric,
+  spreadsheet-first, review-first, and iterative: keep raw evidence under
+  `./investigations/<investigation_id>/evidence/`, structured case facts in
+  `spreadsheet-of-doom/`, narrative judgement in `wiki/`, and let open
+  questions in the case record drive targeted follow-up collection.
+- The repo now has a bounded post-analysis timeline pivot for suspicious
+  windows: reuse `windows-collection` with `--collection-type timeline` so
+  `Windows.NTFS.MFT` and `Windows.EventLogs.EvtxHunter` share the same
+  timebounds, and keep env-bound exports/manifests uniquely suffixed so repeat
+  timeline hunts do not overwrite earlier pivots.
+- The `windows-collection-live` wrapper should always be given the intended
+  remote `--api-client`; otherwise it is easy to fall back to the repo-local
+  Velociraptor workspace and miss the live case host entirely.
+- A broad bounded `timeline` run with default `.` filters is useful as a raw
+  review surface, but it gets noisy quickly: in the current
+  `shieldbase-intrusion` case, the shared 2018-08-31T21:45:00Z to
+  2018-09-06T23:00:00Z window produced 20,669 EVTX rows on `base-file` and
+  278,099 EVTX rows on `base-dc`, so treat those exports as filter-once,
+  reuse-many source files rather than a collection to repeat casually.
+- To fully restore the local Velociraptor stack here, restart all three live
+  shell supervisors together: `supervise_server.sh`,
+  `supervise_mapped_client.sh base-dc`, and `supervise_mapped_client.sh
+  base-file`. The `server-status.env` and `client-status.env` files can stay
+  stale after a crash, so verify recovery with listeners plus a fresh
+  `clients()` API query before assuming the GUI banner is truthful.
+- `Windows.NTFS.MFT` exports in `windows-collection` are now intentionally
+  projected to a stable timestamp/path schema instead of `SELECT *`, so later
+  timeline review gets consistent CSV columns across generic and bounded MFT
+  runs.
+- `Windows.EventLogs.EvtxHunter` exports in `windows-collection` are also now
+  intentionally projected to a stable analyst review schema with only
+  `EventTime`, `Provider`, `EventID`, `EventRecordID`, `UserSID`, `Username`,
+  `EventData`, and `UserData`, which keeps broad timeline EVTX exports smaller
+  and easier to filter downstream.
+- `Windows.EventLogs.RDPAuth` and `Windows.EventLogs.ExplicitLogon` are more
+  useful when exported through fixed analyst-facing schemas instead of raw
+  `SELECT *` dumps. Keep only the RDP/session, credential-use, target, and
+  message fields needed for lateral-movement review.
+- The offline `windows-collection` baseline now includes a dedicated
+  `lateral-movement` section with `Windows.Detection.PublicIP`,
+  `Windows.EventLogs.RDPAuth`, `Windows.EventLogs.ExplicitLogon`,
+  `Windows.Registry.MountPoints2`, and
+  `Windows.EventLogs.ServiceCreationComspec`, and it can also be targeted
+  directly with `--collection-type lateral-movement`.
+
+### 2026-05-12
+
+- Newly added mapped dead-disk clients in this environment should be relaunched
+  under live `supervise_mapped_client.sh` TTY sessions; one-shot background
+  launches can register once and then die while stale `client-status.env`
+  still says `online`.
+- `./venv/bin/python ./skills/windows-collection/scripts/run_windows_collection.py export --artifact <artifact>`
+  is the practical way to analyze partial results while a host's broader `all`
+  collection target is still incomplete.
+- On `base-rd-02`, the combination of `PSReadLine`, `Amcache`, `SRUM`, and
+  exact-path `BinaryHunter` was enough to confirm the `msadvapi2_*` /
+  `wormhole-windows` cluster without waiting for a fresh full Registry Hunter
+  completion.
+- On `dmz-ftp`, a narrow IOC-driven follow-up (`Windows.Search.FileFinder` plus
+  exact-path `Windows.Detection.BinaryHunter`) quickly turned EVTX hints about
+  `C:\\Windows\\Temp\\perfmon\\PWDumpX.exe` into durable on-disk evidence and
+  should be preferred over another broad recollection pass.
+- `windows-collection` should keep request-scoped state under
+  `velociraptor/host-collection/requests/<request_id>/state.json` and treat
+  `host-collection-state.json` as the latest-state compatibility pointer
+  rather than the only durable saved collection record.
+- The Spreadsheet of Doom now benefits from a dedicated `asset-map.csv` sheet
+  for host-to-IP mappings and unresolved recurring source IPs; use that before
+  deciding that more auth or lateral-movement collection is necessary.
+- Cross-host IOC scoping should default to `./skills/windows-analysis/scripts/search_exports.py`
+  over existing exports before queuing fresh collection.
+- On these workstation memory images, Volatility `windows.cmdline`,
+  `windows.cmdscan`, and `windows.consoles` can all remain empty even when a
+  filtered `windows.strings.Strings` pass still preserves useful SharePoint,
+  PSCP, or credential-shaped residue. Treat those as free-memory/session
+  clues, not as reconstructed operator CLI history unless a PID-backed
+  mapping or adjacent execution artefact corroborates them.
+- Spreadsheet of Doom workbook exports now default both header and body cells
+  to 18pt font for easier analyst review.
+- When VT access is available, save the compact JSON reports under the case
+  tree (for example `evidence/reference/virustotal/`) so TI-backed task
+  tracker updates and later reporting can reuse the same outputs without
+  rerunning lookups.
+- When the customer confirms a legitimate response tool such as F-Response,
+  update the case record promptly so the related service or binary is marked
+  as confirmed benign case-context tooling rather than left as an open
+  authorization review item.
+- If multiple task-tracker items have already been answered by reviewed
+  exports, update the tracker, asset map, indicators, timeline, and wiki in
+  the same pass so the case record does not drift behind the evidence.
+- Follow-up on `Windows.EventLogs.ExplicitLogon` should separate routine
+  client-auth noise from higher-signal process-driven movement. Large
+  `OUTLOOK.EXE` volumes to mail servers can be benign background auth, while
+  smaller `WMIC.exe` and PowerShell subsets are usually the better lateral-
+  movement review surface.
+- Do not treat a repeated internal IP:port as malicious by default. In this
+  case, `172.16.4.10:8080` appeared alongside suspicious PowerShell contexts
+  on some hosts but also as the `proxy` field for a benign-looking Chrome
+  updater BITS transfer on `base-rd-02`, so the surrounding process context
+  matters more than the endpoint string alone.
+- The dead-disk `windows-collection` persistence set now includes
+  `Windows.System.Services`, `Windows.Registry.Hunter[all]`,
+  `Windows.Persistence.PermanentWMIEvents`, and
+  `Windows.Sysinternals.Autoruns`, but the WMI and Autoruns artifacts should
+  still be treated as caveated on mapped drives because empty output there is
+  expected.
+- An exact-path `Windows.Search.FileFinder` pivot with `Upload_File=Y` and
+  `Calculate_Hash=Y` is a good narrow follow-up for dead-disk persistence
+  leads. On `base-rd-01`, it cleanly confirmed that `C:/Windows/Temp/1.bat`
+  was not recoverable from the mapped image even though the scheduled task
+  definition persisted in TaskScheduler and Registry Hunter.
+- On the current Windows memory images, Volatility `windows.dumpfiles`,
+  `filescan`, `handles`, and `cmdline` can all stay empty even when raw
+  ASCII/UTF-16LE byte searches still preserve high-value IOC strings. For
+  sparse snapshots, fall back to byte-level IOC searching before concluding
+  that memory lacks useful file or command evidence.
+- When a cleanup command survives only in memory, bracket its timing from
+  adjacent disk and registry artefacts before claiming an execution time. In
+  the current case, a memory-preserved `sd.exe ... n.ps1` command was best
+  bounded by a deleted `sd.exe` MFT row (`2018-09-06T16:12:16Z` to
+  `2018-09-06T16:14:05Z`) plus `SDelete\\EulaAccepted` at
+  `2018-09-06T16:17:26Z`, rather than a nonexistent direct 4688 row.

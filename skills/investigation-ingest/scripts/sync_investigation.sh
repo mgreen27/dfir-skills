@@ -187,6 +187,7 @@ status: active
 
 - [timeline.csv](../spreadsheet-of-doom/timeline.csv)
 - [systems.csv](../spreadsheet-of-doom/systems.csv)
+- [asset-map.csv](../spreadsheet-of-doom/asset-map.csv)
 - [users.csv](../spreadsheet-of-doom/users.csv)
 - [host-indicators.csv](../spreadsheet-of-doom/host-indicators.csv)
 - [network-indicators.csv](../spreadsheet-of-doom/network-indicators.csv)
@@ -198,6 +199,7 @@ status: active
 ## Current Usage
 
 - Track each host in \`systems.csv\`.
+- Track host-to-IP and unresolved IP-to-asset mappings in \`asset-map.csv\`.
 - Track atomic host artifacts in \`host-indicators.csv\`.
 - Track network and infrastructure leads in \`network-indicators.csv\`.
 - Track unanswered questions and next actions in \`task-tracker.csv\`.

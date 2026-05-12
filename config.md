@@ -13,7 +13,7 @@
 | Velociraptor program file | `./velociraptor/velociraptor` |
 | Repo virtualenv | `./venv` |
 | Repo tool staging | repo root |
-| VirusTotal config | `./virustotal-config.json` |
+| VirusTotal config | `./config.json` |
 
 ## Usage
 
@@ -43,5 +43,5 @@
 - Use the repo-local `./venv` as the default Python virtual environment for
   validation, helper tooling, and skill-managed dependency installs.
 - Use `VIRUSTOTAL_API_KEY` as the first-choice VirusTotal credential source,
-  and fall back to the repo-local `./virustotal-config.json` when a skill
-  needs a saved local API key.
+  and fall back to the repo-local `./config.json` when a skill needs a saved
+  local API key.

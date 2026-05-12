@@ -9,6 +9,7 @@ VELOCIRAPTOR_BIN="${WORKSPACE_DIR}/velociraptor"
 SERVER_CONFIG="${WORKSPACE_DIR}/server.config.yaml"
 CLIENT_CONFIG="${WORKSPACE_DIR}/client.config.yaml"
 API_CLIENT_CONFIG="${WORKSPACE_DIR}/api_client.yaml"
+SERVER_WATCHDOG_SCRIPT="${REPO_ROOT}/skills/velociraptor-server-watchdog/scripts/start_server_watchdog.sh"
 GUI_LOG="${WORKSPACE_DIR}/gui.log"
 GUI_PID_FILE="${WORKSPACE_DIR}/gui.pid"
 GUI_WAIT_SECONDS=20
@@ -50,6 +51,26 @@ require_cmd() {
     for cmd in "$@"; do
         command -v "$cmd" >/dev/null 2>&1 || error "Required command not found: $cmd"
     done
+}
+
+absolute_path() {
+    local target="$1"
+    local dir=""
+    local base=""
+
+    if [ -d "$target" ]; then
+        (
+            cd "$target" >/dev/null 2>&1 && pwd -P
+        ) || return 1
+        return 0
+    fi
+
+    dir="$(dirname "$target")"
+    base="$(basename "$target")"
+
+    (
+        cd "$dir" >/dev/null 2>&1 && printf '%s/%s\n' "$(pwd -P)" "$base"
+    ) || return 1
 }
 
 read_yaml_section_value() {
@@ -164,12 +185,10 @@ start_gui_if_needed() {
         return 0
     fi
 
-    info "Starting Velociraptor GUI in the background"
-    (
-        cd "$WORKSPACE_DIR"
-        nohup ./velociraptor gui -v --datastore=. --nobrowser --noclient >"$GUI_LOG" 2>&1 &
-        echo "$!" >"$GUI_PID_FILE"
-    )
+    [ -x "$SERVER_WATCHDOG_SCRIPT" ] || error "Velociraptor server watchdog script not found at ${SERVER_WATCHDOG_SCRIPT}"
+
+    info "Starting Velociraptor GUI under the server watchdog"
+    bash "$SERVER_WATCHDOG_SCRIPT"
 
     if ! wait_for_gui; then
         warn "Velociraptor GUI did not become reachable at $(gui_url)"
@@ -216,6 +235,9 @@ default_hostname() {
 
 validate_evidence_path() {
     [ -e "$EVIDENCE_PATH" ] || error "Evidence path does not exist: ${EVIDENCE_PATH}"
+
+    EVIDENCE_PATH="$(absolute_path "$EVIDENCE_PATH")" || \
+        error "Failed to resolve evidence path: ${EVIDENCE_PATH}"
 
     if [ -f "$EVIDENCE_PATH" ]; then
         local size

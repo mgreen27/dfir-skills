@@ -76,9 +76,9 @@ The GUI log lives at:
 
 - This skill expects `prep-dfir-tools` to have already staged and initialized
   Velociraptor under `./velociraptor/`.
-- The script checks the GUI listener and only starts `./velociraptor gui -v
-  --datastore=. --nobrowser --noclient` when the local GUI is not already
-  reachable.
+- The script checks the GUI listener first and, when needed, starts the local
+  GUI through the `velociraptor-server-watchdog` skill so the server itself is
+  supervised as well.
 - The script validates the generated remapping file so placeholder files such as
   `remappings: true` are rejected before the client starts.
 - Each mapped client gets its own `client.config.yaml`, temp directory, and

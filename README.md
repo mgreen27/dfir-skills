@@ -24,6 +24,9 @@ stages tools in the repo root by default.
 - The analysis loop is iterative: write findings into the wiki, let open
   questions in the wiki drive the next collection step, then feed those new
   results back into the wiki.
+- The default review posture is export-first: prefer existing analyst-ready
+  CSV exports over new collection, and recollect only when explicitly asked or
+  when the current exports cannot answer the evidence question.
 
 ## Repository Layout
 
@@ -39,6 +42,7 @@ investigations/
     spreadsheet-of-doom/
       timeline.csv
       systems.csv
+      asset-map.csv
       users.csv
       host-indicators.csv
       network-indicators.csv
@@ -58,14 +62,16 @@ investigations/
 
 skills/
   prep-dfir-tools/
+  velociraptor-server-watchdog/
   add-velociraptor-mapped-client/
   detect-dfir-collection-type/
   investigation/
   investigation-ingest/
   investigation-query/
   windows-analysis/
-  windows-execution-analysis/
-  windows-registry-analysis/
+  windows-collection/
+  windows-timeline/
+  windows-collection-live/
   memory-analysis/
   virustotal/
 ```
@@ -76,6 +82,7 @@ The investigation record is now spreadsheet-first:
 
 - `timeline.csv` for ordered events and timestamps
 - `systems.csv` for all machines in scope
+- `asset-map.csv` for host-to-IP mappings and unresolved recurring source IPs
 - `users.csv` for account context
 - `host-indicators.csv` for file, binary, and host-resident indicators
 - `network-indicators.csv` for infrastructure and communications pivots
@@ -92,6 +99,10 @@ Recommended storage model:
 - Generate a root-level XLSX workbook named `<investigation_id>_SoD.xlsx`
   after each sync as a convenience view,
   not as the canonical repository format.
+- In `windows-collection`, request-scoped state now lives under
+  `evidence/systems/<system>/velociraptor/host-collection/requests/<request_id>/state.json`,
+  while `host-collection-state.json` remains the latest-state compatibility
+  pointer for the host.
 
 ## Skills
 
@@ -120,7 +131,33 @@ Useful targets:
 ./skills/prep-dfir-tools/scripts/prep_dfir_tools.sh -t velociraptor
 ```
 
-### 2. Add Velociraptor Mapped Client
+### 2. Velociraptor Server Watchdog
+
+Path: `skills/velociraptor-server-watchdog/`
+
+Purpose:
+
+- Keep the local Velociraptor GUI, API, and client-frontend listeners alive.
+- Reuse an already healthy GUI process when one exists.
+- Restart the GUI if listeners disappear or the API stops answering a trivial
+  health query.
+- Write runtime state into `./velociraptor/server-status.env` and
+  `./velociraptor/server-session.env`.
+
+Run:
+
+```bash
+./skills/velociraptor-server-watchdog/scripts/start_server_watchdog.sh
+```
+
+Operational note:
+
+- The watchdog checks both the expected listeners and an API
+  `SELECT 1 AS ok FROM scope()` query before it treats the server as healthy.
+- In the current Codex environment, the most reliable way to keep it alive is
+  still to run the watchdog in a dedicated live session.
+
+### 3. Add Velociraptor Mapped Client
 
 Path: `skills/add-velociraptor-mapped-client/`
 
@@ -141,12 +178,14 @@ Run:
 
 Operational note:
 
+- When the GUI is missing, this skill now starts it through the server
+  watchdog instead of spawning an unsupervised GUI process.
 - Each mapped client now has a local supervisor under
   `./velociraptor/mapped-clients/<name>/supervisor.pid`.
 - The supervisor restarts the client if the process exits or if the API
   `LastSeen` timestamp goes stale.
 
-### 3. Detect DFIR Collection Type
+### 4. Detect DFIR Collection Type
 
 Path: `skills/detect-dfir-collection-type/`
 
@@ -161,7 +200,7 @@ Run:
 python3 ./skills/detect-dfir-collection-type/scripts/detect_collection.py /path/to/evidence
 ```
 
-### 4. Investigation
+### 5. Investigation
 
 Path: `skills/investigation/`
 
@@ -180,7 +219,7 @@ Run:
 ./skills/investigation/scripts/init_investigation.sh shieldbase-intrusion
 ```
 
-### 5. Investigation Ingest
+### 6. Investigation Ingest
 
 Path: `skills/investigation-ingest/`
 
@@ -198,7 +237,7 @@ Run:
 ./skills/investigation-ingest/scripts/sync_investigation.sh shieldbase-intrusion
 ```
 
-### 6. Investigation Query
+### 7. Investigation Query
 
 Path: `skills/investigation-query/`
 
@@ -208,16 +247,16 @@ Purpose:
 - Prefer the accumulated analysis in `wiki/hot.md`, `wiki/analysis.md`, and
   the Spreadsheet of Doom sheets before reopening raw files.
 
-### 7. Windows Analysis
+### 8. Windows Analysis
 
 Path: `skills/windows-analysis/`
 
 Purpose:
 
 - Run Windows-focused Velociraptor analysis artifacts through the local API.
-- Confirm the target client is online before queueing analysis.
-- Check for an existing matching collection before queueing the same artifact
-  and parameter set again.
+- Confirm the target client is online before queueing targeted analysis.
+- Use the separate `windows-collection` skill for machine-wide collection and
+  reuse checks.
 - Write collection outputs into
   `./investigations/<investigation_id>/evidence/systems/<system>/velociraptor/`.
 - Keep iterative analysis in `./investigations/<investigation_id>/wiki/`.
@@ -227,9 +266,23 @@ Purpose:
 - The evidence-of-execution set also includes `Windows.System.AppCompatPCA`,
   with the normal requirement to review the artifact description before using
   it as execution evidence.
-- `Windows.Registry.Hunter` is available as a heavyweight registry follow-up
-  artifact when first-pass Windows triage leaves unresolved persistence,
-  program-execution, services, or user-activity questions.
+- `Windows.Forensics.RecentFileCache` is also part of the evidence-of-execution
+  set for older Windows systems where the cache exists.
+- `Windows.Forensics.SRUM` is also part of the evidence-of-execution set in
+  this repo, with per-scope CSV export for its application, execution, and
+  network usage views.
+- `Windows.Registry.Hunter` is also part of the repo's evidence-of-execution
+  workflow, because it can supply broad registry-backed execution context
+  alongside later persistence, services, and user-activity follow-up.
+- The baseline Windows collection now also includes a dedicated
+  `lateral-movement` section for public-IP auth, RDP auth, explicit logon,
+  `MountPoints2`, and suspicious service creation via `COMSPEC`.
+- The baseline Windows collection persistence section now includes
+  `Windows.System.Services`, `Windows.Registry.Hunter[all]`,
+  `Windows.Persistence.PermanentWMIEvents`, and
+  `Windows.Sysinternals.Autoruns` in addition to startup items, scheduled
+  tasks, and hidden task-cache review. On mapped dead-disk clients, the WMI
+  and Sysinternals Autoruns artifacts can still be sparse or non-functional.
 - Suspicious binaries found during analysis should be reviewed with
   `Windows.Detection.BinaryHunter` so the case records exact hashes, signer
   details, PE metadata, imports, and PDB/build-path clues instead of relying
@@ -238,8 +291,8 @@ Purpose:
   `Windows.System.TaskScheduler`, `Windows.Sys.StartupItems`, and
   `Windows.Registry.TaskCache.HiddenTasks` before relying on the WMI-backed
   `Windows.System.Services` artifact.
-- On dead-disk clients, use the dedicated `windows-registry-analysis` skill
-  and run `Windows.Registry.Hunter` with `RemappingStrategy='None'`.
+- On dead-disk clients, run `Windows.Registry.Hunter` with
+  `RemappingStrategy='None'`.
 
 Examples:
 
@@ -252,27 +305,104 @@ cd ./velociraptor && ./velociraptor -a ./api_client.yaml --runas api query --for
 ./skills/investigation-ingest/scripts/sync_investigation.sh shieldbase-intrusion
 ```
 
-### 8. Windows Execution Analysis
+### 8a. Windows Collection
 
-Path: `skills/windows-execution-analysis/`
+Path: `skills/windows-collection/`
 
 Purpose:
 
-- Run the core Windows evidence-of-execution artifact set through the local
-  Velociraptor API.
-- Reuse finished flows where possible instead of queueing duplicate work.
-- Save raw execution-evidence outputs under
-  `./investigations/<investigation_id>/evidence/systems/<system>/velociraptor/execution-analysis/`.
-- Write a per-host TSV manifest so later review can see artifact, flow, row
-  count, reuse status, and output path without reopening every JSONL file.
+- Queue and reuse machine-wide Windows Velociraptor collection flows for the
+  repo's dead-disk or offline mapped-client workflow, then automatically
+  export finished results to CSV.
+- Treat collection as one flow per artifact, not one bulk host flow.
+- Save durable collection metadata under each host's
+  `velociraptor/host-collection/`.
+- Poll collection state until the requested set is complete.
+- Save generic CSV exports under each host's `velociraptor/exports/` tree as
+  part of the normal `queue`, `ensure`, or `poll` workflow unless export is
+  explicitly disabled.
 
 Run:
 
 ```bash
-./venv/bin/python ./skills/windows-execution-analysis/scripts/run_windows_execution_analysis.py \
+./venv/bin/python ./skills/windows-collection/scripts/run_windows_collection.py \
+  ensure \
   --investigation-id shieldbase-intrusion \
   --host base-dc \
-  --host base-file
+  --collection-type all
+```
+
+Lateral-movement focused collection:
+
+```bash
+./venv/bin/python ./skills/windows-collection/scripts/run_windows_collection.py \
+  ensure \
+  --investigation-id shieldbase-intrusion \
+  --host base-dc \
+  --collection-type lateral-movement
+```
+
+Curated Registry Hunter Program Execution export:
+
+```bash
+./venv/bin/python ./skills/windows-collection/scripts/run_windows_collection.py \
+  export-registry-hunter \
+  --investigation-id shieldbase-intrusion \
+  --host base-dc \
+  --profile execution
+```
+
+### 8b. Windows Timeline
+
+Path: `skills/windows-timeline/`
+
+Purpose:
+
+- Run a bounded post-analysis timeline pivot after iterative review has
+  already identified a suspicious time window.
+- Reuse the `windows-collection` engine to query `Windows.NTFS.MFT` and
+  `Windows.EventLogs.EvtxHunter` with the same `DateAfter` and `DateBefore`
+  bounds.
+- Add optional MFT and EVTX filters so the pivot can widen or confirm adjacent
+  activity without rerunning the full baseline collection.
+- Save durable per-run exports under the host `velociraptor/exports/` tree
+  with unique suffixes for bounded follow-up runs.
+
+Run:
+
+```bash
+./venv/bin/python ./skills/windows-collection/scripts/run_windows_collection.py \
+  ensure \
+  --investigation-id shieldbase-intrusion \
+  --host base-dc \
+  --collection-type timeline \
+  --date-after 2026-05-01T00:00:00Z \
+  --date-before 2026-05-01T06:00:00Z \
+  --evtx-ioc-regex 'powershell|cmd\\.exe|rundll32|wmic'
+```
+
+### 8c. Windows Collection Live
+
+Path: `skills/windows-collection-live/`
+
+Purpose:
+
+- Reuse the same collection/export engine as `windows-collection`, but against
+  a live remote Velociraptor environment.
+- Require an explicit remote `api_client.yaml` instead of assuming the
+  repo-local `./velociraptor/api_client.yaml`.
+- Keep the live/remote workflow separate from the dead-disk/offline workflow
+  so future live-only artifacts can diverge cleanly.
+
+Run:
+
+```bash
+./venv/bin/python ./skills/windows-collection-live/scripts/run_windows_collection_live.py \
+  --api-client /path/to/remote-api_client.yaml \
+  ensure \
+  --investigation-id shieldbase-intrusion \
+  --host live-host-01 \
+  --collection-type execution
 ```
 
 ### 9. Memory Analysis
@@ -289,21 +419,7 @@ Purpose:
   markdown files.
 - Use scan-based plugins and `-vvv` diagnostics when richer plugins fail.
 
-### 10. Windows Registry Analysis
-
-Path: `skills/windows-registry-analysis/`
-
-Purpose:
-
-- Run `Windows.Registry.Hunter` through the local Velociraptor API with
-  `RemappingStrategy='None'`.
-- Fetch the main review output from the `Results` scope.
-- Split large registry collections into system-information and
-  investigation-specific category waves.
-- Save durable registry-hunter outputs under
-  `./investigations/<investigation_id>/evidence/systems/<system>/velociraptor/registry-hunter/`.
-
-### 11. IOC Tracker
+### 10. IOC Tracker
 
 Path: `skills/ioc-tracker/`
 
@@ -314,7 +430,7 @@ Purpose:
 - Separate exact atomic indicators from broader adversary-tracking patterns.
 - Preserve TI placeholders for later VT or external enrichment.
 
-### 12. VirusTotal
+### 11. VirusTotal
 
 Path: `skills/virustotal/`
 
@@ -325,8 +441,11 @@ Purpose:
 - Mirror the referenced `mcp-virustotal` tool surface with report and
   relationship commands.
 - Resolve the API key from `VIRUSTOTAL_API_KEY` first, then fall back to
-  `./virustotal-config.json`.
+  `./config.json`.
 - Save durable VT outputs under `./investigations/<investigation_id>/evidence/virustotal/`
+- Default file-report output is a compact analyst summary with file link,
+  details, and telemetry; URL, IP, and domain reports now follow the same
+  compact-summary pattern. Use `-raw` / `--raw` for the full VT payload
   for later wiki and IOC-tracker use.
 
 Example:
@@ -335,6 +454,7 @@ Example:
 mkdir -p ./investigations/shieldbase-intrusion/evidence/virustotal
 python3 ./skills/virustotal/scripts/virustotal_cli.py list_tools
 python3 ./skills/virustotal/scripts/virustotal_cli.py get_file_report --hash 87c8fa606729ed63cb9d59f6b731338f8b06addbb3ef91e99b773eac2f2c524d --output ./investigations/shieldbase-intrusion/evidence/virustotal/base-dc-subject-srv-file-report.json
+python3 ./skills/virustotal/scripts/virustotal_cli.py get_file_report --hash 87c8fa606729ed63cb9d59f6b731338f8b06addbb3ef91e99b773eac2f2c524d -raw --output ./investigations/shieldbase-intrusion/evidence/virustotal/base-dc-subject-srv-file-report.raw.json
 ```
 
 Examples:

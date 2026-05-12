@@ -15,7 +15,7 @@ investigations/
 investigation-wikis/
 .cache/
 volatility3-cache/
-virustotal-config.json
+config.json
 
 # macOS
 .DS_Store

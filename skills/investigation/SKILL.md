@@ -47,6 +47,7 @@ investigations/<investigation_id>/
   spreadsheet-of-doom/
     timeline.csv
     systems.csv
+    asset-map.csv
     users.csv
     host-indicators.csv
     network-indicators.csv
@@ -95,6 +96,9 @@ Create the case folder with an explicit investigation path:
   narrative reasoning in the wiki pages.
 - Refresh the workbook export after updating the CSVs so analysts have a quick
   XLSX view without changing the canonical CSV record.
+- Use `asset-map.csv` to keep host-to-IP mappings and unresolved recurring
+  source IPs in one place before deciding that more auth or lateral-movement
+  collection is necessary.
 - Use `task-tracker.csv` and the analysis page to route open leads and next
   actions.
 - Use the case `AGENTS.md` to make the iterative loop explicit: the wiki is
